@@ -59,9 +59,14 @@ namespace GTR {
         eRenderingPipeline rendering_pipeline;
         bool render_shadowmaps;
         bool show_gbuffers;
+        bool show_ssao;
+        bool use_ssao;
         
         FBO* gbuffers_fbo;
         FBO* illumination_fbo;
+        FBO* ssao_fbo;
+        
+        std::vector<Vector3> rand_points;
         
         Renderer();
                  
@@ -112,8 +117,12 @@ namespace GTR {
         
         // render illumitation for deferred
         void illuminationDeferred(Camera* camera, GTR::Scene* scene);
+        
+        //render SSAO
+        void renderSSAO(Camera* camera, GTR::Scene* scene);
+        
 	};
-
+    
 	Texture* CubemapFromHDRE(const char* filename);
-
+    std::vector<Vector3> generateSpherePoints(int num, float radius, bool hemi);
 };

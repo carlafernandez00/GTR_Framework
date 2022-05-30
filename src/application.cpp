@@ -249,6 +249,9 @@ void Application::renderDebugGUI(void)
 	ImGui::ColorEdit3("Ambient Light", scene->ambient_light.v);
     ImGui::Checkbox("Shadow Maps", &renderer->render_shadowmaps);
     ImGui::Checkbox("Show GBuffers", &renderer->show_gbuffers);
+    ImGui::Checkbox("Show SSAO", &renderer->show_ssao);
+    ImGui::Checkbox("Show SSAO", &renderer->use_ssao);
+    
     //Choose shader
     ImGui::Combo("Render Mode", (int*)&renderer->rendering_mode, "TEXTURE\0MULTIPASS\0SINGLEPASS\0");
     //Choose Render Pipeline

@@ -16,23 +16,28 @@ using namespace GTR;
 
 
 GTR::Renderer::Renderer(){
-    rendering_mode = eRenderingMode::SINGLEPASS;
+    rendering_mode = eRenderingMode::MULTIPASS;
+    rendering_pipeline = DEFERRED;
+    
     render_shadowmaps = true;
-    rendering_pipeline = FORWARD;
-    gbuffers_fbo = NULL;
-    illumination_fbo = NULL;
     show_gbuffers = false;
+    show_ssao = false;
+    use_ssao = true;
     
     float w = Application::instance->window_width;
     float h = Application::instance->window_height;
     
-    // GBuffers FBO: 3 textures of 4 components, 1 byte per channel and add depth_texture
+    // Init FBOs
     gbuffers_fbo = new FBO();
-    gbuffers_fbo->create(w, h, 3, GL_RGBA, GL_UNSIGNED_BYTE, true );
+    gbuffers_fbo->create(w, h, 3, GL_RGBA, GL_UNSIGNED_BYTE, true);
     
-    // Illumination FBO: 1 textures of 3 components, 1 byte per channel and add depth_texture
     illumination_fbo = new FBO();
-    illumination_fbo->create(w, h ,1, GL_RGB,GL_FLOAT,true );
+    illumination_fbo->create(w, h, 1, GL_RGB, GL_FLOAT, true);
+    
+    ssao_fbo = new FBO();
+    ssao_fbo->create(w, h, 1, GL_RGB, GL_UNSIGNED_BYTE, false);
+    rand_points = generateSpherePoints(64, 1.0, false);
+
 }
 
 // function to sort the render calls of our scene
@@ -140,17 +145,17 @@ void Renderer::renderDeferred(Camera* camera, GTR::Scene* scene, std::vector<Ren
         glDisable(GL_BLEND);
         glDisable(GL_DEPTH_TEST);
         
-        // show color texture
+        // show color texture (alpha component contains rougthness)
         glViewport(0, h*0.5, w*0.5, h*0.5);
         gbuffers_fbo->color_textures[0]->toViewport();
         glEnable(GL_DEPTH_TEST);
         
-        // show normal texture
+        // show normal texture (alpha component contains metalness)
         glViewport(w*0.5, h*0.5, w*0.5, h*0.5);
         gbuffers_fbo->color_textures[1]->toViewport();
         glEnable(GL_DEPTH_TEST);
         
-        // show
+        // show extra texture with emissive light and occlusion factor
         glViewport(0, 0, w*0.5, h*0.5);
         gbuffers_fbo->color_textures[2]->toViewport();
         glEnable(GL_DEPTH_TEST);
@@ -171,7 +176,18 @@ void Renderer::renderDeferred(Camera* camera, GTR::Scene* scene, std::vector<Ren
         glEnable(GL_DEPTH_TEST);
     }
     
-    if(!show_gbuffers){
+    // Compute SSAO
+    ssao_fbo->bind();
+    renderSSAO(camera, scene);
+    ssao_fbo->unbind();
+    
+    if(show_ssao){
+        glDisable(GL_BLEND);
+        ssao_fbo->color_textures[0]->toViewport();
+        glEnable(GL_DEPTH_TEST);
+    }
+    
+    else{
         illumination_fbo->bind();
         illuminationDeferred(camera, scene);
         illumination_fbo->unbind();
@@ -182,6 +198,40 @@ void Renderer::renderDeferred(Camera* camera, GTR::Scene* scene, std::vector<Ren
         illumination_fbo->color_textures[0]->toViewport();
         glEnable(GL_DEPTH_TEST);
     }
+    
+    //set the render state as it was before to avoid problems with future renders
+    glDisable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDepthFunc(GL_LESS);
+}
+void Renderer::renderSSAO(Camera* camera, GTR::Scene* scene){
+    int w = Application::instance->window_width;
+    int h = Application::instance->window_height;
+    
+    // Compute Inverse View Projection
+    Matrix44 inv_vp = camera->viewprojection_matrix;
+    inv_vp.inverse();
+    
+    Mesh* quad = Mesh::getQuad();
+    Shader* shader_ssao = Shader::Get("ssao");
+    shader_ssao->enable();
+    
+    // Clear the color and the depth buffer
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+    checkGLErrors();
+    
+    shader_ssao->setUniform("u_depth_texture", gbuffers_fbo->depth_texture, 9);
+    shader_ssao->setUniform("u_inverse_viewprojection", inv_vp);
+    shader_ssao->setUniform("u_iRes", Vector2(1.0 / (float)w, 1.0 / (float)h));
+    shader_ssao->setUniform("u_viewprojection", camera->viewprojection_matrix);
+    shader_ssao->setUniform3Array("u_points", (float*)&rand_points[0], rand_points.size());
+
+    
+    quad->render(GL_TRIANGLES);
+    
+    shader_ssao->disable();
     
     //set the render state as it was before to avoid problems with future renders
     glDisable(GL_BLEND);
@@ -223,6 +273,7 @@ void Renderer::illuminationDeferred(Camera* camera, GTR::Scene* scene){
     shader->setUniform("u_normal_texture", gbuffers_fbo->color_textures[1], 7);
     shader->setUniform("u_extra_texture", gbuffers_fbo->color_textures[2], 8);
     shader->setUniform("u_depth_texture", gbuffers_fbo->depth_texture, 9);
+    shader->setUniform("u_ssao_texture", ssao_fbo->color_textures[0], 10);
     
     // upload variables to the shader
     shader->setUniform("u_camera_pos", camera->eye);
@@ -230,6 +281,7 @@ void Renderer::illuminationDeferred(Camera* camera, GTR::Scene* scene){
     shader->setUniform("u_inverse_viewprojection", inv_vp);
     shader->setUniform("u_iRes", Vector2(1.0 / (float)w, 1.0 / (float)h));
     shader->setUniform("u_ambient_light", Vector3(0,0,0));  // consider ambient light once
+    shader->setUniform("u_use_ssao", use_ssao);
     
     // Render point and spot lights
     glEnable(GL_CULL_FACE);
@@ -276,6 +328,7 @@ void Renderer::illuminationDeferred(Camera* camera, GTR::Scene* scene){
     shader_quad->setUniform("u_normal_texture", gbuffers_fbo->color_textures[1], 7);
     shader_quad->setUniform("u_extra_texture", gbuffers_fbo->color_textures[2], 8);
     shader_quad->setUniform("u_depth_texture", gbuffers_fbo->depth_texture, 9);
+    shader_quad->setUniform("u_ssao_texture", ssao_fbo->color_textures[0], 10);
     
     // upload variables to the shader
     shader_quad->setUniform("u_camera_pos", camera->eye);
@@ -283,6 +336,7 @@ void Renderer::illuminationDeferred(Camera* camera, GTR::Scene* scene){
     shader_quad->setUniform("u_inverse_viewprojection", inv_vp);
     shader_quad->setUniform("u_iRes", Vector2(1.0 / (float)w, 1.0 / (float)h));
     shader_quad->setUniform("u_ambient_light", scene->ambient_light);  //ambient light
+    shader_quad->setUniform("u_use_ssao", use_ssao);
     
     // render directional lights
     glEnable(GL_BLEND);
@@ -629,6 +683,32 @@ void Renderer::uploadLight(LightEntity* light, Shader* shader)
     else
         shader->setUniform("u_light_cast_shadows", 0);
 }
+
+std::vector<Vector3> GTR::generateSpherePoints(int num, float radius, bool hemi)
+{
+    std::vector<Vector3> points;
+    points.resize(num);
+    for (int i = 0; i < num; i += 1)
+    {
+        Vector3& p = points[i];
+        float u = random(1.0);
+        float v = random(1.0);
+        float theta = u * 2.0 * PI;
+        float phi = acos(2.0 * v - 1.0);
+        float r = cbrt( random(1.0) * 0.9 + 0.1 ) * radius;
+        float sinTheta = sin(theta);
+        float cosTheta = cos(theta);
+        float sinPhi = sin(phi);
+        float cosPhi = cos(phi);
+        p.x = r * sinPhi * cosTheta;
+        p.y = r * sinPhi * sinTheta;
+        p.z = r * cosPhi;
+        if (hemi && p.z < 0)
+            p.z *= -1.0;
+    }
+    return points;
+}
+
 
 void Renderer::renderLightMultiPass(Mesh* mesh, Shader* shader){
     
