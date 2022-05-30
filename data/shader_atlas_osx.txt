@@ -140,6 +140,93 @@ float get_shadow_factor(mat4 u_shadow_viewproj, vec3 world_position, float u_sha
     return shadow_factor;
 }
 
+//PBR
+\functions_PBR
+#define RECIPROCAL_PI 0.3183098861837697
+#define PI 3.14159265358979323846
+
+// Normal Distribution Function using GGX Distribution
+float D_GGX (const in float NoH, const in float linearRoughness )
+{
+    float a2 = linearRoughness * linearRoughness;
+    float f = (NoH * NoH) * (a2 - 1.0) + 1.0;
+    return a2 / (PI * f * f);
+}
+
+// Fresnel term with colorized fresnel (f90 = 1)
+float F_Schlick( const in float VoH, const in float f0)
+{
+    float f = pow(1.0 - VoH, 5.0);
+    return f0 + (1.0 - f0) * f;
+}
+
+// Fresnel term with colorized fresnel
+vec3 F_Schlick( const in float VoH, const in vec3 f0)
+{
+    float f = pow(1.0 - VoH, 5.0);
+    return f0 + (vec3(1.0) - f0) * f;
+}
+
+// Geometry Term: Geometry masking/shadowing due to microfacets
+float GGX(float NdotV, float k){
+    return NdotV / (NdotV * (1.0 - k) + k);
+}
+    
+float G_Smith( float NdotV, float NdotL, float roughness)
+{
+    float k = pow(roughness + 1.0, 2.0) / 8.0;
+    return GGX(NdotL, k) * GGX(NdotV, k);
+}
+
+//this is the cook torrance specular reflection model
+vec3 specularBRDF( float roughness, vec3 f0, float NoH, float NoV, float NoL, float LoH )
+{
+    float a = roughness * roughness;
+
+    // Normal Distribution Function
+    float D = D_GGX( NoH, a );
+
+    // Fresnel Function
+    vec3 F = F_Schlick( LoH, f0 );
+
+    // Visibility Function (shadowing/masking)
+    float G = G_Smith( NoV, NoL, roughness );
+        
+    // Norm factor
+    vec3 spec = D * G * F;
+    spec /= (4.0 * NoL * NoV + 1e-6);
+
+    return spec;
+}
+
+// Diffuse Reflections: Disney BRDF using retro-reflections using F term, this is much more complex!!
+float Fd_Burley ( const in float NoV, const in float NoL, const in float LoH, const in float linearRoughness)
+{
+        float f90 = 0.5 + 2.0 * linearRoughness * LoH * LoH;
+        float lightScatter = F_Schlick(NoL, f90);
+        float viewScatter  = F_Schlick(NoV, f90);
+        return lightScatter * viewScatter * RECIPROCAL_PI;
+}
+
+vec3 compute_direct_light(vec3 u_camera_pos, vec3 world_position, vec3 L, vec3 N, vec4 color, float metalness, float roughness, float NoL){
+    vec3 V = normalize( u_camera_pos - world_position);
+    vec3 H = normalize( L + V );
+    float NoH = clamp(dot(N,H), 0.0, 1.0);
+    float NoV = clamp(dot(N,V), 0.0, 1.0);
+    float LoH = clamp(dot(L,H), 0.0, 1.0);
+    
+    vec3 f0 = mix( vec3(0.5), color.xyz, metalness ); //we compute the reflection in base to the color and the metalness
+    vec3 diffuseColor = (1.0 - metalness) * color.xyz; //metallic materials do not have diffuse
+    
+    vec3 Fr_d = specularBRDF(roughness, f0, NoH, NoV, NoL, LoH); //compute the specular
+
+    // Here we use the Burley, but you can replace it by the Lambert.
+    float linearRoughness = pow(roughness, 2.0);
+    vec3 Fd_d = diffuseColor * Fd_Burley(NoV,NoL,LoH,linearRoughness);
+    vec3 direct = Fr_d + Fd_d; //add diffuse and specular reflection
+    return direct;
+}
+
 //----
 
 \basic.vs
@@ -315,6 +402,7 @@ void main()
 
 \light.fs
 #include "functions_utils"
+#include "functions_PBR"
 
 varying vec3 v_position;
 varying vec3 v_world_position;
@@ -325,6 +413,7 @@ varying vec4 v_color;
 uniform vec4 u_color;
 uniform float u_time;
 uniform float u_alpha_cutoff;
+uniform vec3 u_camera_position;
 
 uniform vec3 u_light_color;
 uniform vec3 u_light_position;
@@ -397,7 +486,13 @@ void main()
         shadowFactor = get_shadow_factor(u_shadow_viewproj, v_world_position,  u_shadow_bias, u_light_shadowmap,u_light_type);
 
     float NdotL = clamp(dot(N, L), 0.0, 1.0);
-    light += (NdotL * u_light_color) * att_factor * spotFactor * shadowFactor; // modify the amount of light
+    
+    //PBR
+    float metalness = texture2D(u_metallic_roughness_texture, uv).z;
+    float roughness = texture2D(u_metallic_roughness_texture, uv).y;
+    vec3 direct = compute_direct_light(u_camera_position, v_world_position, L, N, color, metalness, roughness, NdotL);
+    
+    light += (NdotL * u_light_color) * att_factor * spotFactor * shadowFactor * direct;
     
     color.xyz *= light;
     color.xyz += u_emissive_factor * (texture2D(u_emissive_texture, v_uv).xyz); //emissive light
@@ -547,6 +642,7 @@ varying vec2 v_uv;
 uniform vec4 u_color;
 uniform float u_time;
 uniform float u_alpha_cutoff;
+uniform vec3 u_camera_pos;
 
 uniform vec3 u_light_color;
 uniform vec3 u_light_position;
@@ -641,6 +737,7 @@ varying vec2 v_uv;
 uniform vec4 u_color;
 uniform float u_time;
 uniform float u_alpha_cutoff;
+uniform vec3 u_camera_pos;
 
 uniform vec3 u_light_color;
 uniform vec3 u_light_position;

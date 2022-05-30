@@ -18,7 +18,7 @@ using namespace GTR;
 GTR::Renderer::Renderer(){
     rendering_mode = eRenderingMode::MULTIPASS;
     render_shadowmaps = true;
-    rendering_pipeline = DEFERRED;
+    rendering_pipeline = FORWARD;
     gbuffers_fbo = NULL;
     illumination_fbo = NULL;
     show_gbuffers = false;
@@ -278,6 +278,7 @@ void Renderer::illuminationDeferred(Camera* camera, GTR::Scene* scene){
     shader_quad->setUniform("u_depth_texture", gbuffers_fbo->depth_texture, 9);
     
     // upload variables to the shader
+    shader_quad->setUniform("u_camera_pos", camera->eye);
     shader_quad->setUniform("u_viewprojection", camera->viewprojection_matrix);
     shader_quad->setUniform("u_inverse_viewprojection", inv_vp);
     shader_quad->setUniform("u_iRes", Vector2(1.0 / (float)w, 1.0 / (float)h));
