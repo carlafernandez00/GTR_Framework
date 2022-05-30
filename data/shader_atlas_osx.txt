@@ -1,0 +1,737 @@
+//example of some shaders compiled
+flat basic.vs flat.fs
+texture basic.vs texture.fs
+depth quad.vs depth.fs
+
+light basic.vs light.fs
+single_light basic.vs single_light.fs
+
+gbuffers basic.vs gbuffers.fs
+deferred quad.vs deferred.fs
+deferred_ws basic.vs deferred_ws.fs
+
+//UTILS
+\functions_utils
+mat3 cotangent_frame(vec3 N, vec3 p, vec2 uv)
+{
+    // get edge vectors of the pixel triangle
+    vec3 dp1 = dFdx( p );
+    vec3 dp2 = dFdy( p );
+    vec2 duv1 = dFdx( uv );
+    vec2 duv2 = dFdy( uv );
+    
+    // solve the linear system
+    vec3 dp2perp = cross( dp2, N );
+    vec3 dp1perp = cross( N, dp1 );
+    vec3 T = dp2perp * duv1.x + dp1perp * duv2.x;
+    vec3 B = dp2perp * duv1.y + dp1perp * duv2.y;
+ 
+    // construct a scale-invariant frame
+    float invmax = inversesqrt( max( dot(T,T), dot(B,B) ) );
+    return mat3( T * invmax, B * invmax, N );
+}
+
+// assume N, the interpolated vertex normal and
+// WP the world position
+//vec3 normal_pixel = texture2D( normalmap, uv ).xyz;
+vec3 perturbNormal(vec3 N, vec3 WP, vec2 uv, vec3 normal_pixel)
+{
+    normal_pixel = normal_pixel * 255./127. - 128./127.;
+    mat3 TBN = cotangent_frame(N, WP, uv);
+    return normalize(TBN * normal_pixel);
+
+}
+
+// compute spot factor for spot lights
+float get_spot_factor(vec3 u_light_vec, vec3 L, vec3 u_light_cone)
+{
+    float spotFactor = 1.0;
+    float spotCosine = dot(normalize(u_light_vec),normalize(L));
+    if (spotCosine >= u_light_cone.z) {
+        spotFactor = pow(spotCosine,u_light_cone.y);
+    }
+    else { // The point is outside the cone of light from the spotlight.
+        spotFactor = 0.0; // The light will add no color to the point.
+    }
+    return spotFactor;
+}
+
+// compute normal
+vec3 compute_normal(sampler2D u_normal_texture, vec2 uv, vec3 v_normal, vec3 world_position)
+{
+    vec3 normal_pixel = texture2D( u_normal_texture, uv ).xyz; //in tangent space
+    vec3 normal = normalize(v_normal);
+    vec3 N = vec3(0,0,0);
+
+    if(normal_pixel == vec3(0,0,0))
+    {
+        // if we don't have normal map
+        N = normal;
+    }
+    else{
+        // get normal map in normalmap space
+        N = perturbNormal(normal, world_position, uv, normal_pixel);
+    }
+    return N;
+}
+
+// compute occlusion
+float compute_occlusion(sampler2D u_occlusion_texture, sampler2D u_metallic_roughness_texture, vec2 uv)
+{
+    // occlusions info will be stored eather in occlusion_texture or in R channel of metallic_roughness_texture
+    float occ_occ = texture2D(u_occlusion_texture, uv).x;
+    float occ_m_r = texture2D(u_metallic_roughness_texture, uv).x;
+    return occ_occ * occ_m_r;
+}
+
+// compute linear attenuation factor and normalize
+float get_att_factor(float u_light_max_dist, float light_dist)
+{
+    float att_factor = u_light_max_dist - light_dist;
+    att_factor /= u_light_max_dist;
+    att_factor = max(att_factor, 0.0);            //ignore negative values
+    att_factor *= pow(att_factor, 2.0);           //non linear attenuation
+    
+    return att_factor;
+}
+
+//compute shadow factor
+float get_shadow_factor(mat4 u_shadow_viewproj, vec3 world_position, float u_shadow_bias, sampler2D u_light_shadowmap, int u_light_type)
+{
+    //project our 3D position to the shadowmap
+    vec4 proj_pos = u_shadow_viewproj * vec4(world_position,1.0);
+
+    //from homogeneus space to clip space
+    vec2 shadow_uv = proj_pos.xy / proj_pos.w;
+
+    //from clip space to uv space
+    shadow_uv = shadow_uv * 0.5 + vec2(0.5);
+
+    //get point depth [-1 .. +1] in non-linear space
+    float real_depth = (proj_pos.z - u_shadow_bias) / proj_pos.w;
+
+    //normalize from [-1..+1] to [0..+1] still non-linear
+    real_depth = real_depth * 0.5 + 0.5;
+
+    //read depth from depth buffer in [0..+1] non-linear
+    float shadow_depth = texture2D( u_light_shadowmap, shadow_uv).x;
+
+    //compute final shadow factor by comparing
+    float shadow_factor = 1.0;
+    
+    //DIRECTIONAL LIGHT
+    if(u_light_type == 1)
+    {
+        //it is outside on the sides
+        if( shadow_uv.x < 0.0 || shadow_uv.x > 1.0 ||
+            shadow_uv.y < 0.0 || shadow_uv.y > 1.0 )
+            shadow_factor = 1.0;
+
+        //it is before near or behind far plane
+        if(real_depth < 0.0 || real_depth > 1.0)
+            shadow_factor = 1.0;
+
+    }
+    
+    //we can compare them, even if they are not linear
+    if( shadow_depth < real_depth )
+        shadow_factor = 0.0;
+        
+    return shadow_factor;
+}
+
+//----
+
+\basic.vs
+
+
+attribute vec3 a_vertex;
+attribute vec3 a_normal;
+attribute vec2 a_coord;
+attribute vec4 a_color;
+
+uniform vec3 u_camera_pos;
+
+uniform mat4 u_model;
+uniform mat4 u_viewprojection;
+
+//this will store the color for the pixel shader
+varying vec3 v_position;
+varying vec3 v_world_position;
+varying vec3 v_normal;
+varying vec2 v_uv;
+varying vec4 v_color;
+
+void main()
+{	
+	//calcule the normal in camera space (the NormalMatrix is like ViewMatrix but without traslation)
+	v_normal = (u_model * vec4( a_normal, 0.0) ).xyz;
+	
+	//calcule the vertex in object space
+	v_position = a_vertex;
+	v_world_position = (u_model * vec4( v_position, 1.0) ).xyz;
+	
+	//store the color in the varying var to use it from the pixel shader
+	v_color = a_color;
+
+	//store the texture coordinates
+	v_uv = a_coord;
+
+	//calcule the position of the vertex using the matrices
+	gl_Position = u_viewprojection * vec4( v_world_position, 1.0 );
+}
+
+\quad.vs
+
+attribute vec3 a_vertex;
+attribute vec2 a_coord;
+varying vec2 v_uv;
+
+void main()
+{
+    v_uv = a_coord;
+    gl_Position = vec4( a_vertex, 1.0 );
+}
+
+\instanced.vs
+
+
+attribute vec3 a_vertex;
+attribute vec3 a_normal;
+attribute vec2 a_coord;
+
+attribute mat4 u_model;
+
+uniform vec3 u_camera_pos;
+
+uniform mat4 u_viewprojection;
+
+//this will store the color for the pixel shader
+varying vec3 v_position;
+varying vec3 v_world_position;
+varying vec3 v_normal;
+varying vec2 v_uv;
+
+void main()
+{
+    //calcule the normal in camera space (the NormalMatrix is like ViewMatrix but without traslation)
+    v_normal = (u_model * vec4( a_normal, 0.0) ).xyz;
+    
+    //calcule the vertex in object space
+    v_position = a_vertex;
+    v_world_position = (u_model * vec4( a_vertex, 1.0) ).xyz;
+    
+    //store the texture coordinates
+    v_uv = a_coord;
+
+    //calcule the position of the vertex using the matrices
+    gl_Position = u_viewprojection * vec4( v_world_position, 1.0 );
+}
+
+
+\multi.fs
+
+#version 330 core
+
+varying vec3 v_position;
+varying vec3 v_world_position;
+varying vec3 v_normal;
+varying vec2 v_uv;
+
+uniform vec4 u_color;
+uniform sampler2D u_texture;
+uniform float u_time;
+uniform float u_alpha_cutoff;
+
+void main()
+{
+    vec2 uv = v_uv;
+    vec4 color = u_color;
+    color *= texture( u_texture, uv );
+
+    if(color.a < u_alpha_cutoff)
+        discard;
+
+    vec3 N = normalize(v_normal);
+
+    gl_FragData[0] = color;
+    gl_FragData[1] = vec4(N,1.0);
+}
+
+
+\depth.fs
+
+//#version 330 core
+
+uniform vec2 u_camera_nearfar;
+uniform sampler2D u_texture; //depth map
+varying vec2 v_uv;
+
+void main()
+{
+    float n = u_camera_nearfar.x;
+    float f = u_camera_nearfar.y;
+    float z = texture2D(u_texture,v_uv).x;
+    float color = n * (z + 1.0) / (f + n - z * (f - n));
+    gl_FragColor = vec4(color);
+}
+
+\flat.fs
+
+
+uniform vec4 u_color;
+
+void main()
+{
+	gl_FragColor = u_color;
+}
+
+
+\texture.fs
+
+varying vec3 v_position;
+varying vec3 v_world_position;
+varying vec3 v_normal;
+varying vec2 v_uv;
+varying vec4 v_color;
+
+uniform vec4 u_color;
+uniform sampler2D u_texture;
+uniform float u_time;
+uniform float u_alpha_cutoff;
+
+void main()
+{
+	vec2 uv = v_uv;
+	vec4 color = u_color;
+	color *= texture2D( u_texture, uv );
+
+	if(color.a < u_alpha_cutoff)
+		discard;
+
+	gl_FragColor = color;
+}
+
+
+\light.fs
+#include "functions_utils"
+
+varying vec3 v_position;
+varying vec3 v_world_position;
+varying vec3 v_normal;
+varying vec2 v_uv;
+varying vec4 v_color;
+
+uniform vec4 u_color;
+uniform float u_time;
+uniform float u_alpha_cutoff;
+
+uniform vec3 u_light_color;
+uniform vec3 u_light_position;
+uniform vec3 u_ambient_light;
+uniform float u_light_max_dist;
+uniform int u_light_type;
+uniform vec3 u_light_vec;
+uniform vec3 u_light_cone;
+
+uniform sampler2D u_texture;
+uniform sampler2D u_normal_texture;
+uniform sampler2D u_emissive_texture;
+uniform vec3 u_emissive_factor;
+uniform sampler2D u_occlusion_texture;
+uniform sampler2D u_metallic_roughness_texture;
+
+uniform int u_light_cast_shadows;
+uniform sampler2D u_light_shadowmap;
+uniform mat4 u_shadow_viewproj;
+uniform float u_shadow_bias;
+
+void main()
+{
+    vec2 uv = v_uv;
+    float spotFactor = 1.0;
+    vec3 N = vec3(0,0,0);
+    float shadowFactor = 1.0;
+    vec3 L = vec3(0,0,0);
+    
+    // compute normal
+    N = compute_normal(u_normal_texture, uv, v_normal, v_world_position);
+    
+    // compute color
+    vec4 color = u_color;
+    color *= texture2D( u_texture, uv );
+
+    if(color.a < u_alpha_cutoff)
+        discard;
+    
+    // ambient light considering occlusions
+    float occlusion = compute_occlusion(u_occlusion_texture,u_metallic_roughness_texture,uv);
+    vec3 light = vec3(u_ambient_light) * occlusion; // ambient light
+    
+    // compute light vector
+    
+    //DIRECTIONAL LIGHT
+    if(u_light_type == 1)
+    {
+        L = u_light_vec;
+    }
+    else
+    {
+        // POINT LIGHT
+        L = u_light_position - v_world_position;
+        if(u_light_type == 2)
+        {
+            // SPOT LIGHT
+            spotFactor = get_spot_factor(u_light_vec, L, u_light_cone);
+        }
+    }
+
+    float light_dist = length(L);        //get distance
+    L /= light_dist;                     //normalize L vector
+    
+    // compute linear attenuation factor and normalize
+    float att_factor = get_att_factor(u_light_max_dist, light_dist);
+    
+    // compute shadow factor
+    if(u_light_cast_shadows == 1)
+        shadowFactor = get_shadow_factor(u_shadow_viewproj, v_world_position,  u_shadow_bias, u_light_shadowmap,u_light_type);
+
+    float NdotL = clamp(dot(N, L), 0.0, 1.0);
+    light += (NdotL * u_light_color) * att_factor * spotFactor * shadowFactor; // modify the amount of light
+    
+    color.xyz *= light;
+    color.xyz += u_emissive_factor * (texture2D(u_emissive_texture, v_uv).xyz); //emissive light
+    gl_FragColor = color;
+}
+
+\single_light.fs
+#include "functions_utils"
+
+varying vec3 v_position;
+varying vec3 v_world_position;
+varying vec3 v_normal;
+varying vec2 v_uv;
+varying vec4 v_color;
+
+uniform vec4 u_color;
+uniform float u_time;
+uniform float u_alpha_cutoff;
+
+uniform vec3 u_ambient_light;
+uniform int u_num_lights;
+
+uniform sampler2D u_texture;
+uniform sampler2D u_normal_texture;
+uniform sampler2D u_emissive_texture;
+uniform vec3 u_emissive_factor;
+uniform sampler2D u_occlusion_texture;
+uniform sampler2D u_metallic_roughness_texture;
+
+const int MAX_LIGHTS = 8;
+uniform vec3 u_light_pos[MAX_LIGHTS];
+uniform vec3 u_light_color[MAX_LIGHTS];
+uniform float u_light_max_dist[MAX_LIGHTS];
+uniform int u_light_type[MAX_LIGHTS];
+uniform vec3 u_light_vec[MAX_LIGHTS];
+uniform vec3 u_light_cone[MAX_LIGHTS];
+
+void main()
+{
+    vec2 uv = v_uv;
+    vec3 N = vec3(0,0,0);
+    
+    // compute normal
+    N = compute_normal(u_normal_texture, uv, v_normal, v_world_position);
+    
+    // compute color
+    vec4 color = u_color;
+    color *= texture2D( u_texture, uv );
+
+    if(color.a < u_alpha_cutoff)
+        discard;
+    
+    // ambient light considering occlusions
+    float occlusion = compute_occlusion(u_occlusion_texture,u_metallic_roughness_texture,uv);
+    vec3 light = vec3(u_ambient_light) * occlusion; // ambient light
+    
+    for(int i = 0; i < MAX_LIGHTS; ++i)
+    {
+        float spotFactor = 1.0;
+        vec3 L = vec3(0,0,0);
+        
+        if(i < u_num_lights)
+        {
+            //DIRECTIONAL LIGHT
+            if(u_light_type[i] == 1)
+            {
+                L = u_light_vec[i];
+            }
+            else
+            {
+                // POINT LIGHT
+                L = u_light_pos[i] - v_world_position;
+                if(u_light_type[i] == 2)
+                {
+                    // SPOT LIGHT
+                    spotFactor = get_spot_factor(u_light_vec[i], L, u_light_cone[i]);
+                }
+            }
+
+            float light_dist = length(L);        //get distance
+            L /= light_dist;                     //normalize L vector
+            
+            // compute linear attenuation factor and normalize
+            float att_factor = get_att_factor(u_light_max_dist[i], light_dist);
+
+            float NdotL = clamp(dot(N, L), 0.0, 1.0);
+            light += (NdotL * u_light_color[i]) * att_factor * spotFactor; // modify the amount of light
+        }
+    
+    }
+    color.xyz *= light;
+    color.xyz += u_emissive_factor * (texture2D(u_emissive_texture, v_uv).xyz);
+    gl_FragColor = color;
+}
+
+\gbuffers.fs
+#include "functions_utils"
+
+varying vec3 v_position;
+varying vec3 v_world_position;
+varying vec3 v_normal;
+varying vec2 v_uv;
+varying vec4 v_color;
+
+uniform vec4 u_color;
+uniform float u_time;
+uniform float u_alpha_cutoff;
+
+uniform sampler2D u_texture;
+uniform sampler2D u_normal_texture;
+uniform sampler2D u_emissive_texture;
+uniform vec3 u_emissive_factor;
+uniform sampler2D u_occlusion_texture;
+uniform sampler2D u_metallic_roughness_texture;
+
+void main()
+{
+    vec2 uv = v_uv;
+    vec3 normal = vec3(0,0,0);
+
+    // compute normal
+    normal = compute_normal(u_normal_texture, uv, v_normal, v_world_position);
+    
+    // compute color
+    vec4 color = u_color;
+    color *= texture2D( u_texture, uv );
+
+    if(color.a < u_alpha_cutoff)
+        discard;
+    
+    // compute occulison
+    float occlusion = compute_occlusion(u_occlusion_texture,u_metallic_roughness_texture,uv);
+    
+    // compute emissive light
+    vec3 emissive = u_emissive_factor * (texture2D(u_emissive_texture, v_uv).xyz);
+    
+    // store info in gbuffers
+    gl_FragData[0] = vec4(color.xyz, 1.0);
+    gl_FragData[1] = vec4(normal * 0.5 + vec3(0.5), 1.0); //normal map in range [0..1]
+    gl_FragData[2] = vec4(emissive, occlusion);  //emissive light(RGB) and occlussion(alphs)
+}
+
+\deferred.fs
+#include "functions_utils"
+
+varying vec2 v_uv;
+uniform vec4 u_color;
+uniform float u_time;
+uniform float u_alpha_cutoff;
+
+uniform vec3 u_light_color;
+uniform vec3 u_light_position;
+uniform vec3 u_ambient_light;
+uniform float u_light_max_dist;
+uniform int u_light_type;
+uniform vec3 u_light_vec;
+uniform vec3 u_light_cone;
+
+uniform sampler2D u_color_texture;
+uniform sampler2D u_normal_texture;
+uniform sampler2D u_extra_texture;
+uniform sampler2D u_depth_texture;
+
+uniform int u_light_cast_shadows;
+uniform sampler2D u_light_shadowmap;
+uniform mat4 u_shadow_viewproj;
+uniform float u_shadow_bias;
+
+uniform vec2 u_iRes;
+uniform mat4 u_inverse_viewprojection;
+
+void main()
+{
+    vec2 uv = gl_FragCoord.xy * u_iRes.xy;
+    float spotFactor = 1.0;
+    float shadowFactor = 1.0;
+    vec3 L = vec3(0,0,0);
+    
+    // get info from extra texture
+    vec4 extra = texture2D(u_extra_texture, uv);
+    vec3 emissive = extra.xyz; // emissive light stored in RGB channel
+    float occlusion = extra.a; // occlusion stored in Alpha channel
+    
+    // compute normal -> must be converted from 0..1 to -1..+1
+    vec3 N = texture2D( u_normal_texture, uv ).xyz * 2.0 - vec3(1.0);
+    N = normalize(N); //always normalize in case of data loss
+    
+    // compute color
+    vec4 color = vec4(texture2D( u_color_texture, uv ).xyz, 1.0);
+    
+    // get world position from depth
+    float depth = float(texture2D( u_depth_texture, uv ).x);
+    vec4 screen_pos = vec4( uv.x *2.0 -1.0, uv.y * 2.0 -1.0, depth*2.0-1.0, 1.0 ); // conv todo de -1 a 1
+    vec4 proj_worldpos = u_inverse_viewprojection * screen_pos;
+    vec3 world_position = proj_worldpos.xyz / proj_worldpos.w ;
+    
+    // ambient light considering occlusions
+    vec3 light = vec3(u_ambient_light) * occlusion; // ambient light + occlusions
+    
+    // compute light vector
+    
+    //DIRECTIONAL LIGHT
+    if(u_light_type == 1)
+    {
+        L = u_light_vec;
+    }
+    else
+    {
+        // POINT LIGHT
+        L = u_light_position - world_position;
+        if(u_light_type == 2)
+        {
+            // SPOT LIGHT
+            spotFactor = get_spot_factor(u_light_vec, L, u_light_cone);
+        }
+    }
+
+    float light_dist = length(L);        //get distance
+    L /= light_dist;                     //normalize L vector
+    
+    // compute linear attenuation factor and normalize
+    float att_factor = get_att_factor(u_light_max_dist, light_dist);
+    
+    // compute shadow factor
+    if(u_light_cast_shadows == 1)
+        shadowFactor = get_shadow_factor(u_shadow_viewproj, world_position,  u_shadow_bias, u_light_shadowmap,u_light_type);
+
+    float NdotL = clamp(dot(N, L), 0.0, 1.0);
+    light += (NdotL * u_light_color) * att_factor * spotFactor * shadowFactor; // modify the amount of light
+    
+    color.xyz *= light;
+    color.xyz += emissive; // add emissive light
+    gl_FragColor = color;
+}
+
+\deferred_ws.fs
+#include "functions_utils"
+
+varying vec2 v_uv;
+
+uniform vec4 u_color;
+uniform float u_time;
+uniform float u_alpha_cutoff;
+
+uniform vec3 u_light_color;
+uniform vec3 u_light_position;
+uniform vec3 u_ambient_light;
+uniform float u_light_max_dist;
+uniform int u_light_type;
+uniform vec3 u_light_vec;
+uniform vec3 u_light_cone;
+
+uniform sampler2D u_color_texture;
+uniform sampler2D u_normal_texture;
+uniform sampler2D u_extra_texture;
+uniform sampler2D u_depth_texture;
+
+uniform int u_light_cast_shadows;
+uniform sampler2D u_light_shadowmap;
+uniform mat4 u_shadow_viewproj;
+uniform float u_shadow_bias;
+
+uniform vec2 u_iRes;
+uniform mat4 u_inverse_viewprojection;
+
+void main()
+{
+    vec2 uv = gl_FragCoord.xy * u_iRes.xy;
+    float spotFactor = 1.0;
+    float shadowFactor = 1.0;
+    vec3 L = vec3(0,0,0);
+    
+    // get world position from depth
+    float depth = float(texture2D( u_depth_texture, uv ).x);
+    
+    //ignore pixels in the background
+    if(depth >= 1.0)
+        discard;
+        
+    vec4 screen_pos = vec4( uv.x *2.0 -1.0, uv.y * 2.0 -1.0, depth*2.0-1.0, 1.0 ); // conv todo de -1 a 1
+    vec4 proj_worldpos = u_inverse_viewprojection * screen_pos;
+    vec3 world_position = proj_worldpos.xyz / proj_worldpos.w ;
+    
+    // get info from extra texture
+    vec4 extra = texture2D(u_extra_texture, uv);
+    vec3 emissive = extra.xyz; // emissive light stored in RGB channel
+    float occlusion = extra.a; // occlusion stored in Alpha channel
+    
+    // compute normal -> must be converted from 0..1 to -1..+1
+    vec3 N = texture2D( u_normal_texture, uv ).xyz * 2.0 - vec3(1.0);
+    N = normalize(N); //always normalize in case of data loss
+    
+    // compute color
+    vec4 color = vec4(texture2D( u_color_texture, uv ).xyz, 1.0);
+    
+    
+    // ambient light considering occlusions
+    vec3 light = vec3(u_ambient_light) * occlusion; // ambient light + occlusions
+    
+    // compute light vector
+    
+    //DIRECTIONAL LIGHT
+    if(u_light_type == 1)
+    {
+        L = u_light_vec;
+    }
+    else
+    {
+        // POINT LIGHT
+        L = u_light_position - world_position;
+        if(u_light_type == 2)
+        {
+            // SPOT LIGHT
+            spotFactor = get_spot_factor(u_light_vec, L, u_light_cone);
+        }
+    }
+
+    float light_dist = length(L);        //get distance
+    L /= light_dist;                     //normalize L vector
+    
+    // compute linear attenuation factor and normalize
+    float att_factor = get_att_factor(u_light_max_dist, light_dist);
+    
+    // compute shadow factor
+    if(u_light_cast_shadows == 1)
+        shadowFactor = get_shadow_factor(u_shadow_viewproj, world_position,  u_shadow_bias, u_light_shadowmap,u_light_type);
+
+    float NdotL = clamp(dot(N, L), 0.0, 1.0);
+    light += (NdotL * u_light_color) * att_factor * spotFactor * shadowFactor; // modify the amount of light
+    
+    color.xyz *= light;
+    color.xyz += emissive; // add emissive light
+    gl_FragColor = color;
+}
+
+
+
