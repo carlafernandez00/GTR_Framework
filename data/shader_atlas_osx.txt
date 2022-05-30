@@ -501,6 +501,7 @@ void main()
 
 \single_light.fs
 #include "functions_utils"
+#include "functions_PBR"
 
 varying vec3 v_position;
 varying vec3 v_world_position;
@@ -511,6 +512,7 @@ varying vec4 v_color;
 uniform vec4 u_color;
 uniform float u_time;
 uniform float u_alpha_cutoff;
+uniform vec3 u_camera_position;
 
 uniform vec3 u_ambient_light;
 uniform int u_num_lights;
@@ -544,6 +546,10 @@ void main()
 
     if(color.a < u_alpha_cutoff)
         discard;
+        
+    // get metalness and roughness
+    float metalness = texture2D(u_metallic_roughness_texture, uv).z;
+    float roughness = texture2D(u_metallic_roughness_texture, uv).y;
     
     // ambient light considering occlusions
     float occlusion = compute_occlusion(u_occlusion_texture,u_metallic_roughness_texture,uv);
@@ -579,7 +585,11 @@ void main()
             float att_factor = get_att_factor(u_light_max_dist[i], light_dist);
 
             float NdotL = clamp(dot(N, L), 0.0, 1.0);
-            light += (NdotL * u_light_color[i]) * att_factor * spotFactor; // modify the amount of light
+            
+            //PBR
+            vec3 direct = compute_direct_light(u_camera_position, v_world_position, L, N, color, metalness, roughness, NdotL);
+            
+            light += (NdotL * u_light_color[i]) * att_factor * spotFactor * direct; // modify the amount of light
         }
     
     }
@@ -629,14 +639,19 @@ void main()
     // compute emissive light
     vec3 emissive = u_emissive_factor * (texture2D(u_emissive_texture, v_uv).xyz);
     
+    // get metalness and roughness
+    float roughness = texture2D(u_metallic_roughness_texture, uv).y;
+    float metalness = texture2D(u_metallic_roughness_texture, uv).z;
+    
     // store info in gbuffers
-    gl_FragData[0] = vec4(color.xyz, 1.0);
-    gl_FragData[1] = vec4(normal * 0.5 + vec3(0.5), 1.0); //normal map in range [0..1]
+    gl_FragData[0] = vec4(color.xyz, roughness);
+    gl_FragData[1] = vec4(normal * 0.5 + vec3(0.5), metalness); //normal map in range [0..1]
     gl_FragData[2] = vec4(emissive, occlusion);  //emissive light(RGB) and occlussion(alphs)
 }
 
 \deferred.fs
 #include "functions_utils"
+#include "functions_PBR"
 
 varying vec2 v_uv;
 uniform vec4 u_color;
@@ -681,9 +696,13 @@ void main()
     vec3 N = texture2D( u_normal_texture, uv ).xyz * 2.0 - vec3(1.0);
     N = normalize(N); //always normalize in case of data loss
     
-    // compute color
+    // get color
     vec4 color = vec4(texture2D( u_color_texture, uv ).xyz, 1.0);
     
+    // get roughness and metalness
+    float roughness = texture2D(u_color_texture, uv).a;
+    float metalness = texture2D(u_normal_texture, uv).a;
+        
     // get world position from depth
     float depth = float(texture2D( u_depth_texture, uv ).x);
     vec4 screen_pos = vec4( uv.x *2.0 -1.0, uv.y * 2.0 -1.0, depth*2.0-1.0, 1.0 ); // conv todo de -1 a 1
@@ -722,7 +741,9 @@ void main()
         shadowFactor = get_shadow_factor(u_shadow_viewproj, world_position,  u_shadow_bias, u_light_shadowmap,u_light_type);
 
     float NdotL = clamp(dot(N, L), 0.0, 1.0);
-    light += (NdotL * u_light_color) * att_factor * spotFactor * shadowFactor; // modify the amount of light
+    vec3 direct = compute_direct_light(u_camera_pos, world_position, L, N, color, metalness, roughness, NdotL);
+        
+    light += (NdotL * u_light_color) * att_factor * spotFactor * shadowFactor * direct;
     
     color.xyz *= light;
     color.xyz += emissive; // add emissive light
@@ -731,6 +752,7 @@ void main()
 
 \deferred_ws.fs
 #include "functions_utils"
+#include "functions_PBR"
 
 varying vec2 v_uv;
 
@@ -770,10 +792,10 @@ void main()
     // get world position from depth
     float depth = float(texture2D( u_depth_texture, uv ).x);
     
-    //ignore pixels in the background
-    if(depth >= 1.0)
-        discard;
-        
+    // get roughness and metalness
+    float roughness = texture2D(u_color_texture, uv).a;
+    float metalness = texture2D(u_normal_texture, uv).a;
+    
     vec4 screen_pos = vec4( uv.x *2.0 -1.0, uv.y * 2.0 -1.0, depth*2.0-1.0, 1.0 ); // conv todo de -1 a 1
     vec4 proj_worldpos = u_inverse_viewprojection * screen_pos;
     vec3 world_position = proj_worldpos.xyz / proj_worldpos.w ;
@@ -823,6 +845,8 @@ void main()
         shadowFactor = get_shadow_factor(u_shadow_viewproj, world_position,  u_shadow_bias, u_light_shadowmap,u_light_type);
 
     float NdotL = clamp(dot(N, L), 0.0, 1.0);
+    vec3 direct = compute_direct_light(u_camera_pos, world_position, L, N, color, metalness, roughness, NdotL);
+    
     light += (NdotL * u_light_color) * att_factor * spotFactor * shadowFactor; // modify the amount of light
     
     color.xyz *= light;

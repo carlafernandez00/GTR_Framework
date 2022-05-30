@@ -16,7 +16,7 @@ using namespace GTR;
 
 
 GTR::Renderer::Renderer(){
-    rendering_mode = eRenderingMode::MULTIPASS;
+    rendering_mode = eRenderingMode::SINGLEPASS;
     render_shadowmaps = true;
     rendering_pipeline = FORWARD;
     gbuffers_fbo = NULL;
