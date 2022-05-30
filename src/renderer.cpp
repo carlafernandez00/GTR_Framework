@@ -36,7 +36,7 @@ GTR::Renderer::Renderer(){
     
     ssao_fbo = new FBO();
     ssao_fbo->create(w, h, 1, GL_RGB, GL_UNSIGNED_BYTE, false);
-    rand_points = generateSpherePoints(64, 1.0, false);
+    rand_points = generateSpherePoints(64, 1.0, true);
 
 }
 
