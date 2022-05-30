@@ -143,7 +143,6 @@ void Renderer::renderDeferred(Camera* camera, GTR::Scene* scene, std::vector<Ren
     // show gbuffers
     if(show_gbuffers){
         glDisable(GL_BLEND);
-        glDisable(GL_DEPTH_TEST);
         
         // show color texture (alpha component contains rougthness)
         glViewport(0, h*0.5, w*0.5, h*0.5);
@@ -194,7 +193,6 @@ void Renderer::renderDeferred(Camera* camera, GTR::Scene* scene, std::vector<Ren
         
         // show in screen
         glDisable(GL_BLEND);
-        glDisable(GL_DEPTH_TEST);
         illumination_fbo->color_textures[0]->toViewport();
         glEnable(GL_DEPTH_TEST);
     }

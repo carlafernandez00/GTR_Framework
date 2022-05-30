@@ -917,8 +917,13 @@ void main()
     //for every sample around the point
     for( int i = 0; i < samples; ++i )
     {
+        
+        // rotate point
+        mat3 rotation_mat = cotangent_frame( N, world_position, uv);
+        vec3 rotated_point = rotation_mat * u_points[i];
+        
         //compute is world position using the random
-        vec3 p = world_position + u_points[i] * 10.0;
+        vec3 p = world_position + rotated_point * 10.0;
         
         //find the uv in the depth buffer of this point
         vec4 proj = u_viewprojection * vec4(p,1.0);
