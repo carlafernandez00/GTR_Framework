@@ -22,7 +22,7 @@ GTR::Renderer::Renderer(){
     render_shadowmaps = true;
     show_gbuffers = false;
     show_ssao = false;
-    use_ssao = true;
+    use_ssao = false;
     
     float w = Application::instance->window_width;
     float h = Application::instance->window_height;

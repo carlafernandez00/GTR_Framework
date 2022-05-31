@@ -99,15 +99,15 @@ void Application::render(void)
 	else
 		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
-	//lets render something
-	//Matrix44 model;
-	//renderer->renderPrefab( model, prefab, camera );
-
-	renderer->renderScene(scene, camera);
 
 	//Draw the floor grid, helpful to have a reference point
 	if(render_debug)
 		drawGrid();
+    
+    //lets render something
+    //Matrix44 model;
+    //renderer->renderPrefab( model, prefab, camera );
+    renderer->renderScene(scene, camera);
 
     glDisable(GL_DEPTH_TEST);
     //render anything in the gui after this

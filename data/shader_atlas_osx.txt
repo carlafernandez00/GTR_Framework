@@ -229,6 +229,19 @@ vec3 compute_direct_light(vec3 u_camera_pos, vec3 world_position, vec3 L, vec3 N
     return direct;
 }
 
+//Gamma-Degamma
+\functions_color_space
+vec3 degamma(vec3 c)
+{
+    return pow(c,vec3(2.2));
+}
+
+vec3 gamma(vec3 c)
+{
+    return pow(c,vec3(1.0/2.2));
+}
+
+
 //----
 
 \basic.vs
