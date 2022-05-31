@@ -30,6 +30,7 @@ GTR::Renderer::Renderer(){
     use_hdr = false;
     use_dither = false;
     pbr = false;
+    add_lights = true;
     
     float w = Application::instance->window_width;
     float h = Application::instance->window_height;
@@ -93,6 +94,23 @@ void Renderer::renderScene(GTR::Scene* scene, Camera* camera)
     
     // sort render_call_vector before rendering
     std::sort(std::begin(this->render_call_vector), std::end(this->render_call_vector), sortRCVector());
+    
+    // Add 20 lights to the scene!
+    if(add_lights && rand_lights.size()==0)
+    {
+        for(int i = 0; i < this->num_lights; i++)
+        {
+            LightEntity* light = new LightEntity();
+            light->name = "rand_pointlight_" + std::to_string(i);
+            light->model.translate(float(random(-300, 300)),float(random(1, 300)),float(random(-300, 300)));
+            light->light_type = POINT;
+            light->max_dist = float(random(1, 300));
+            rand_lights.push_back(light);
+            this->lights.push_back(light);
+        }
+    }
+    
+    else if(!add_lights){rand_lights.clear();}
     
     // generate shadowmaps
     for(int i=0; i < this->lights.size(); i++){

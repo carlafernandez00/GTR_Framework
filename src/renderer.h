@@ -74,6 +74,8 @@ namespace GTR {
         bool use_hdr;
         bool use_dither;
         bool pbr;
+        bool add_lights;
+        int num_lights;
         
         FBO* gbuffers_fbo;
         FBO* illumination_fbo;
@@ -81,6 +83,7 @@ namespace GTR {
         FBO* blur_ssao_fbo;
         
         std::vector<Vector3> rand_points;
+        std::vector<GTR::LightEntity*> rand_lights;
         
         Renderer();
                  
@@ -134,7 +137,7 @@ namespace GTR {
         
         //render SSAO
         void renderSSAO(Camera* camera, GTR::Scene* scene);
-        
+
 	};
     
 	Texture* CubemapFromHDRE(const char* filename);

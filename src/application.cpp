@@ -257,6 +257,9 @@ void Application::renderDebugGUI(void)
     ImGui::Checkbox("Use PBR", &renderer->pbr);
     ImGui::Checkbox("Show Scene", &renderer->show_scene);
     
+    ImGui::Checkbox("Add Random Point Lights", &renderer->add_lights);
+    if(&renderer->add_lights){ImGui::SliderInt("Number of Lights", &renderer->num_lights, 1, 25);}
+    
     if(&renderer->use_hdr)
     {
     //Choose shader
