@@ -29,8 +29,14 @@ namespace GTR {
     };
 
     enum eToneMapper{
-        UNCHARTED2 = 0,
-        LUMA_BASED_REINHARD = 1
+        UNCHARTED2,
+        LUMA_BASED_REINHARD
+    };
+
+    enum eShowOption {
+        GBUFFERS,
+        SSAO,
+        SCENE
     };
 
     struct RenderCall
@@ -65,17 +71,13 @@ namespace GTR {
         eToneMapper tone_mapper;
         
         bool render_shadowmaps;
-        bool show_gbuffers;
-        bool show_ssao;
-        bool show_scene;
+        eShowOption show_option;
         
         bool use_ssao;
         bool use_blur_ssao;
         bool use_hdr;
         bool use_dither;
         bool pbr;
-        bool add_lights;
-        int num_lights;
         
         FBO* gbuffers_fbo;
         FBO* illumination_fbo;

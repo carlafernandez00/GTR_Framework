@@ -770,6 +770,7 @@ uniform vec2 u_iRes;
 uniform mat4 u_inverse_viewprojection;
 
 uniform int u_use_ssao;
+uniform int u_use_ssao_blur;
 uniform int u_use_hdr;
 uniform int u_pbr;
 
@@ -801,7 +802,7 @@ void main()
     vec3 world_position = proj_worldpos.xyz / proj_worldpos.w ;
     
     // get AO factor from ssao texture
-    if(u_use_ssao == 1){
+    if(u_use_ssao == 1 || u_use_ssao_blur == 1){
         float ao_factor = texture2D(u_ssao_texture, uv).x;
         ao_factor = pow(ao_factor, 3.0);
         occlusion = ao_factor;
@@ -888,6 +889,7 @@ uniform vec2 u_iRes;
 uniform mat4 u_inverse_viewprojection;
 
 uniform int u_use_ssao;
+uniform int u_use_ssao_blur;
 uniform int u_use_hdr;
 uniform int u_pbr;
 
@@ -919,7 +921,7 @@ void main()
     if(u_use_hdr == 1){color.xyz = degamma(color.xyz);}
         
     // get AO factor from ssao texture
-    if(u_use_ssao == 1){
+    if(u_use_ssao == 1  || u_use_ssao_blur == 1){
         float ao_factor = texture2D(u_ssao_texture, uv).x;
         ao_factor = pow(ao_factor, 3.0);
         occlusion = ao_factor;

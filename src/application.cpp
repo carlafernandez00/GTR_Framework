@@ -244,36 +244,48 @@ void Application::renderDebugGUI(void)
 	//System stats
 	ImGui::Text(getGPUStats().c_str());					   // Display some text (you can use a format strings too)
 
+
+	//Choose Render Pipeline
+	ImGui::Combo("Render Pipeline", (int*)&renderer->rendering_pipeline, "FORWARD\0DEFERRED\0");
+
 	ImGui::Checkbox("Wireframe", &render_wireframe);
 	ImGui::ColorEdit3("BG color", scene->background_color.v);
 	ImGui::ColorEdit3("Ambient Light", scene->ambient_light.v);
-    ImGui::Checkbox("Shadow Maps", &renderer->render_shadowmaps);
-    ImGui::Checkbox("Show GBuffers", &renderer->show_gbuffers);
-    ImGui::Checkbox("Show SSAO", &renderer->show_ssao);
-    ImGui::Checkbox("Use SSAO", &renderer->use_ssao);
-    ImGui::Checkbox("Use SSAO+", &renderer->use_blur_ssao);
-    ImGui::Checkbox("Use HRD", &renderer->use_hdr);
-    ImGui::Checkbox("Dithering", &renderer->use_dither);
-    ImGui::Checkbox("Use PBR", &renderer->pbr);
-    ImGui::Checkbox("Show Scene", &renderer->show_scene);
+
     
-    ImGui::Checkbox("Add Random Point Lights", &renderer->add_lights);
-    if(&renderer->add_lights){ImGui::SliderInt("Number of Lights", &renderer->num_lights, 1, 25);}
-    
-    if(&renderer->use_hdr)
-    {
-    //Choose shader
-    ImGui::Combo("Tone Mapper", (int*)&renderer->tone_mapper, "UNCHARTED2\0LUMA_BASED_REINHARD\0");
-    }
-    
-    //Choose shader
-    ImGui::Combo("Render Mode", (int*)&renderer->rendering_mode, "TEXTURE\0MULTIPASS\0SINGLEPASS\0");
-    //Choose Render Pipeline
-    ImGui::Combo("Render Pipeline", (int*)&renderer->rendering_pipeline, "FORWARD\0DEFERRED\0");
-    
-    
-    
-    
+	//add info to the debug panel about rebder mode
+	if (ImGui::TreeNode("Render Mode")) {
+		if (renderer->rendering_pipeline == GTR::eRenderingPipeline::FORWARD) {
+			//Choose shader
+			ImGui::Combo("Render Mode", (int*)&renderer->rendering_mode, "TEXTURE\0MULTIPASS\0SINGLEPASS\0");
+			if (renderer->rendering_mode == GTR::eRenderingMode::MULTIPASS || renderer->rendering_mode == GTR::eRenderingMode::SINGLEPASS)
+			{ 
+				ImGui::Checkbox("PBR", &renderer->pbr); //PBR
+				if (renderer->rendering_mode == GTR::eRenderingMode::MULTIPASS){ ImGui::Checkbox("Shadow Maps", &renderer->render_shadowmaps); }
+			}
+		}
+		else if (renderer->rendering_pipeline == GTR::eRenderingPipeline::DEFERRED) {
+			// show optiona
+			ImGui::Combo("Show Option", (int*)&renderer->show_option, "GBUFFERS\0SSA0\0SCENE\0");
+			// if SSAO or SCENE, choose to use SSAO or SSAO+ -> when non is checked for SSAO case, SSAO will be used as defauld
+			if (renderer->show_option == GTR::eShowOption::SCENE || renderer->show_option == GTR::eShowOption::SSAO) {
+				ImGui::Checkbox("SSAO", &renderer->use_ssao);
+				ImGui::Checkbox("SSAO+", &renderer->use_blur_ssao);
+
+				// if SCENE id chosen, Render options
+				if (renderer->show_option == GTR::eShowOption::SCENE) {
+					ImGui::Checkbox("Shadow Maps", &renderer->render_shadowmaps); // shadowmap
+					ImGui::Checkbox("PBR", &renderer->pbr);                       // PBR
+					ImGui::Checkbox("Dithering", &renderer->use_dither);          // dithering
+					ImGui::Checkbox("Use HRD", &renderer->use_hdr);               // HDR
+					if (renderer->use_hdr) { ImGui::Combo("Tone Mapper", (int*)&renderer->tone_mapper, "UNCHARTED2\0LUMA_BASED_REINHARD\0"); }
+				}
+			}
+		}
+		
+		ImGui::TreePop();
+	}
+
 	//add info to the debug panel about the camera
 	if (ImGui::TreeNode(camera, "Camera")) {
 		camera->renderInMenu();

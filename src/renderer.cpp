@@ -18,19 +18,19 @@ using namespace GTR;
 GTR::Renderer::Renderer(){
     rendering_mode = eRenderingMode::SINGLEPASS;
     rendering_pipeline = FORWARD;
-    tone_mapper = LUMA_BASED_REINHARD;
     
+    
+    // show options
     render_shadowmaps = true;
-    show_gbuffers = false;
-    show_ssao = false;
-    show_scene = true;
-    
+    show_option = SCENE;
+
+    // usage bools
     use_ssao = false;
-    use_blur_ssao = false;
+    use_blur_ssao = true;
     use_hdr = false;
     use_dither = false;
     pbr = false;
-    add_lights = true;
+    tone_mapper = LUMA_BASED_REINHARD;
     
     float w = Application::instance->window_width;
     float h = Application::instance->window_height;
@@ -94,22 +94,6 @@ void Renderer::renderScene(GTR::Scene* scene, Camera* camera)
     // sort render_call_vector before rendering
     std::sort(std::begin(this->render_call_vector), std::end(this->render_call_vector), sortRCVector());
     
-    // Add 20 lights to the scene!
-    if(add_lights && rand_lights.size()==0)
-    {
-        for(int i = 0; i < this->num_lights; i++)
-        {
-            LightEntity* light = new LightEntity();
-            light->name = "rand_pointlight_" + std::to_string(i);
-            light->model.translate(float(random(-300, 300)),float(random(1, 300)),float(random(-300, 300)));
-            light->light_type = POINT;
-            light->max_dist = float(random(1, 300));
-            rand_lights.push_back(light);
-            this->lights.push_back(light);
-        }
-    }
-    
-    else if(!add_lights){rand_lights.clear();}
     
     // generate shadowmaps
     for(int i=0; i < this->lights.size(); i++){
@@ -167,7 +151,7 @@ void Renderer::renderDeferred(Camera* camera, GTR::Scene* scene, std::vector<Ren
     gbuffers_fbo->unbind();
     
     // show gbuffers
-    if(show_gbuffers){
+    if(show_option==GBUFFERS){
         glDisable(GL_BLEND);
         
         // show color texture (alpha component contains rougthness)
@@ -204,13 +188,13 @@ void Renderer::renderDeferred(Camera* camera, GTR::Scene* scene, std::vector<Ren
     // Compute SSAO
     renderSSAO(camera, scene);
     
-    if(show_ssao){
+    if(show_option==SSAO){
         glDisable(GL_BLEND);
         ssao_fbo->color_textures[0]->toViewport();
         glEnable(GL_DEPTH_TEST);
     }
     
-    if(show_scene){
+    if(show_option==SCENE){
         illumination_fbo->bind();
         illuminationDeferred(camera, scene);
         illumination_fbo->unbind();
@@ -260,6 +244,7 @@ void Renderer::renderSSAO(Camera* camera, GTR::Scene* scene){
     checkGLErrors();
     
     shader_ssao->setUniform("u_depth_texture", gbuffers_fbo->depth_texture, 9);
+    shader_ssao->setUniform("u_normal_texture", gbuffers_fbo->color_textures[1], 7);
     shader_ssao->setUniform("u_inverse_viewprojection", inv_vp);
     shader_ssao->setUniform("u_iRes", Vector2(1.0 / (float)w, 1.0 / (float)h));
     shader_ssao->setUniform("u_viewprojection", camera->viewprojection_matrix);
@@ -274,7 +259,13 @@ void Renderer::renderSSAO(Camera* camera, GTR::Scene* scene){
     // SSAO+
     if(use_blur_ssao){
         blur_ssao_fbo->bind();
-        
+
+        // Clear the color and the depth buffer
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_BLEND);
+        checkGLErrors();
+
         Shader* shader_blur_ssao = Shader::Get("blur_ssao");
         shader_blur_ssao->enable();
         
@@ -339,6 +330,7 @@ void Renderer::illuminationDeferred(Camera* camera, GTR::Scene* scene){
     shader->setUniform("u_iRes", Vector2(1.0 / (float)w, 1.0 / (float)h));
     shader->setUniform("u_ambient_light", Vector3(0,0,0));  // consider ambient light once
     shader->setUniform("u_use_ssao", use_ssao);
+    shader->setUniform("u_use_ssao_blur", use_blur_ssao);
     shader->setUniform("u_use_hdr", use_hdr);
     shader->setUniform("u_pbr", pbr);
     
@@ -396,6 +388,7 @@ void Renderer::illuminationDeferred(Camera* camera, GTR::Scene* scene){
     shader_quad->setUniform("u_iRes", Vector2(1.0 / (float)w, 1.0 / (float)h));
     shader_quad->setUniform("u_ambient_light", scene->ambient_light);  //ambient light
     shader_quad->setUniform("u_use_ssao", use_ssao);
+    shader_quad->setUniform("u_use_ssao_blur", use_blur_ssao);
     shader_quad->setUniform("u_use_hdr", use_hdr);
     shader_quad->setUniform("u_pbr", pbr);
     
