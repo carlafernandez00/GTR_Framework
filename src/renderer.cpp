@@ -23,8 +23,11 @@ GTR::Renderer::Renderer(){
     render_shadowmaps = true;
     show_gbuffers = false;
     show_ssao = false;
+    show_scene = true;
+    
     use_ssao = false;
-    use_hdr = false;
+    use_blur_ssao = true;
+    use_hdr = true;
     use_dither = true;
     
     float w = Application::instance->window_width;
@@ -40,7 +43,9 @@ GTR::Renderer::Renderer(){
     ssao_fbo = new FBO();
     ssao_fbo->create(w, h, 1, GL_RGB, GL_UNSIGNED_BYTE, false);
     rand_points = generateSpherePoints(64, 1.0, true);
-
+    
+    blur_ssao_fbo = new FBO();
+    blur_ssao_fbo->create(w, h, 1, GL_RGB, GL_UNSIGNED_BYTE, false);
 }
 
 // function to sort the render calls of our scene
@@ -179,9 +184,7 @@ void Renderer::renderDeferred(Camera* camera, GTR::Scene* scene, std::vector<Ren
     }
     
     // Compute SSAO
-    ssao_fbo->bind();
     renderSSAO(camera, scene);
-    ssao_fbo->unbind();
     
     if(show_ssao){
         glDisable(GL_BLEND);
@@ -189,7 +192,7 @@ void Renderer::renderDeferred(Camera* camera, GTR::Scene* scene, std::vector<Ren
         glEnable(GL_DEPTH_TEST);
     }
     
-    else{
+    if(show_scene){
         illumination_fbo->bind();
         illuminationDeferred(camera, scene);
         illumination_fbo->unbind();
@@ -219,6 +222,8 @@ void Renderer::renderDeferred(Camera* camera, GTR::Scene* scene, std::vector<Ren
     glDepthFunc(GL_LESS);
 }
 void Renderer::renderSSAO(Camera* camera, GTR::Scene* scene){
+    ssao_fbo->bind();
+    
     int w = Application::instance->window_width;
     int h = Application::instance->window_height;
     
@@ -241,11 +246,31 @@ void Renderer::renderSSAO(Camera* camera, GTR::Scene* scene){
     shader_ssao->setUniform("u_iRes", Vector2(1.0 / (float)w, 1.0 / (float)h));
     shader_ssao->setUniform("u_viewprojection", camera->viewprojection_matrix);
     shader_ssao->setUniform3Array("u_points", (float*)&rand_points[0], rand_points.size());
-
+    
     
     quad->render(GL_TRIANGLES);
     
     shader_ssao->disable();
+    ssao_fbo->unbind();
+    
+    // SSAO+
+    if(use_blur_ssao){
+        blur_ssao_fbo->bind();
+        
+        Shader* shader_blur_ssao = Shader::Get("blur_ssao");
+        shader_blur_ssao->enable();
+        
+        shader_blur_ssao->setUniform("u_ssao_fbo", ssao_fbo->color_textures[0], 11);
+        shader_blur_ssao->setUniform("u_texture_size", Vector2(w,h));
+        
+        quad->render(GL_TRIANGLES);
+        
+        shader_blur_ssao->disable();
+        blur_ssao_fbo->unbind();
+        
+        blur_ssao_fbo->color_textures[0]->copyTo(ssao_fbo->color_textures[0]);
+    }
+    
     
     //set the render state as it was before to avoid problems with future renders
     glDisable(GL_BLEND);

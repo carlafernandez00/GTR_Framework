@@ -251,6 +251,7 @@ void Application::renderDebugGUI(void)
     ImGui::Checkbox("Show GBuffers", &renderer->show_gbuffers);
     ImGui::Checkbox("Show SSAO", &renderer->show_ssao);
     ImGui::Checkbox("Use SSAO", &renderer->use_ssao);
+    ImGui::Checkbox("Use SSAO+", &renderer->use_blur_ssao);
     ImGui::Checkbox("Use HRD", &renderer->use_hdr);
     ImGui::Checkbox("Use HRD", &renderer->use_dither);
     

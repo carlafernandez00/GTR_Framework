@@ -11,6 +11,7 @@ deferred quad.vs deferred.fs
 deferred_ws basic.vs deferred_ws.fs
 
 ssao quad.vs ssao.fs
+blur_ssao quad.vs blur_ssao.fs
 HDR_tonemapping quad.vs HDR_tonemapping.fs
 
 //UTILS
@@ -1029,6 +1030,31 @@ void main()
     float ao = float(num) / float(samples);
     gl_FragColor = vec4(ao);
 }
+
+\blur_ssao.fs
+#include "functions_color_space"
+
+varying vec2 v_uv;
+uniform sampler2D u_ssao_fbo;
+uniform vec2 u_texture_size;
+
+void main() {
+
+    vec2 texelSize = 1.0 / u_texture_size;
+    float result = 0.0;
+    
+    for (int x = -2; x < 2; ++x)
+    {
+        for (int y = -2; y < 2; ++y)
+        {
+            vec2 offset = vec2(float(x), float(y)) * texelSize;
+            result += texture2D(u_ssao_fbo, v_uv + offset).r;
+        }
+    }
+    
+    gl_FragColor = vec4(result / vec4(4.0 * 4.0));
+}
+
 
 \HDR_tonemapping.fs
 #include "functions_color_space"

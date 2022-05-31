@@ -67,13 +67,17 @@ namespace GTR {
         bool render_shadowmaps;
         bool show_gbuffers;
         bool show_ssao;
+        bool show_scene;
+        
         bool use_ssao;
+        bool use_blur_ssao;
         bool use_hdr;
         bool use_dither;
         
         FBO* gbuffers_fbo;
         FBO* illumination_fbo;
         FBO* ssao_fbo;
+        FBO* blur_ssao_fbo;
         
         std::vector<Vector3> rand_points;
         
