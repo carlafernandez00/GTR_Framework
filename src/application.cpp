@@ -250,7 +250,13 @@ void Application::renderDebugGUI(void)
     ImGui::Checkbox("Shadow Maps", &renderer->render_shadowmaps);
     ImGui::Checkbox("Show GBuffers", &renderer->show_gbuffers);
     ImGui::Checkbox("Show SSAO", &renderer->show_ssao);
-    ImGui::Checkbox("Show SSAO", &renderer->use_ssao);
+    ImGui::Checkbox("Use SSAO", &renderer->use_ssao);
+    ImGui::Checkbox("Use HRD", &renderer->use_hdr);
+    if(&renderer->use_hdr)
+    {
+    //Choose shader
+    ImGui::Combo("Tone Mapper", (int*)&renderer->tone_mapper, "UNCHARTED2\LUMA_BASED_REINHARD\0");
+    }
     
     //Choose shader
     ImGui::Combo("Render Mode", (int*)&renderer->rendering_mode, "TEXTURE\0MULTIPASS\0SINGLEPASS\0");

@@ -28,6 +28,11 @@ namespace GTR {
         DEPTH
     };
 
+    enum eToneMapper{
+        UNCHARTED2 = 0,
+        LUMA_BASED_REINHARD = 1
+    };
+
     struct RenderCall
         {
             Material* material;
@@ -57,10 +62,13 @@ namespace GTR {
         std::vector<GTR::LightEntity*> lights;
         eRenderingMode rendering_mode;
         eRenderingPipeline rendering_pipeline;
+        eToneMapper tone_mapper;
+        
         bool render_shadowmaps;
         bool show_gbuffers;
         bool show_ssao;
         bool use_ssao;
+        bool use_hdr;
         
         FBO* gbuffers_fbo;
         FBO* illumination_fbo;

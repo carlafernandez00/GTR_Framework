@@ -18,11 +18,13 @@ using namespace GTR;
 GTR::Renderer::Renderer(){
     rendering_mode = eRenderingMode::MULTIPASS;
     rendering_pipeline = DEFERRED;
+    tone_mapper = LUMA_BASED_REINHARD;
     
     render_shadowmaps = true;
     show_gbuffers = false;
     show_ssao = false;
     use_ssao = false;
+    use_hdr = true;
     
     float w = Application::instance->window_width;
     float h = Application::instance->window_height;
@@ -193,8 +195,21 @@ void Renderer::renderDeferred(Camera* camera, GTR::Scene* scene, std::vector<Ren
         
         // show in screen
         glDisable(GL_BLEND);
-        illumination_fbo->color_textures[0]->toViewport();
+        
+        if(use_hdr){
+        Shader* shader_hdr = Shader::getDefaultShader("HDR_tonemapping");
+        shader_hdr->enable();
+        shader_hdr->setUniform("u_tonemapper", tone_mapper);
+            
+        illumination_fbo->color_textures[0]->toViewport(shader_hdr);
         glEnable(GL_DEPTH_TEST);
+        shader_hdr->disable();
+        }
+        else
+        {
+            illumination_fbo->color_textures[0]->toViewport();
+            glEnable(GL_DEPTH_TEST);
+        }
     }
     
     //set the render state as it was before to avoid problems with future renders
@@ -280,6 +295,7 @@ void Renderer::illuminationDeferred(Camera* camera, GTR::Scene* scene){
     shader->setUniform("u_iRes", Vector2(1.0 / (float)w, 1.0 / (float)h));
     shader->setUniform("u_ambient_light", Vector3(0,0,0));  // consider ambient light once
     shader->setUniform("u_use_ssao", use_ssao);
+    shader->setUniform("u_use_hdr", use_hdr);
     
     // Render point and spot lights
     glEnable(GL_CULL_FACE);
@@ -335,6 +351,7 @@ void Renderer::illuminationDeferred(Camera* camera, GTR::Scene* scene){
     shader_quad->setUniform("u_iRes", Vector2(1.0 / (float)w, 1.0 / (float)h));
     shader_quad->setUniform("u_ambient_light", scene->ambient_light);  //ambient light
     shader_quad->setUniform("u_use_ssao", use_ssao);
+    shader_quad->setUniform("u_use_hdr", use_hdr);
     
     // render directional lights
     glEnable(GL_BLEND);
