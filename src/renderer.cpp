@@ -24,7 +24,8 @@ GTR::Renderer::Renderer(){
     show_gbuffers = false;
     show_ssao = false;
     use_ssao = false;
-    use_hdr = true;
+    use_hdr = false;
+    use_dither = true;
     
     float w = Application::instance->window_width;
     float h = Application::instance->window_height;
@@ -486,8 +487,9 @@ void Renderer::setRenderCallVector(const Matrix44& prefab_model, GTR::Node* node
 void Renderer::renderMeshWithMaterialToGBuffers(const Matrix44 model, Mesh* mesh, GTR::Material* material, Camera* camera)
 {
     //in case the material has transparencies
-    if (material->alpha_mode == eAlphaMode::BLEND)
-        return;
+    if(!use_dither)
+        if (material->alpha_mode == eAlphaMode::BLEND)
+            return;
     
     //in case there is nothing to do
     if (!mesh || !mesh->getNumVertices() || !material )
@@ -526,6 +528,7 @@ void Renderer::renderMeshWithMaterialToGBuffers(const Matrix44 model, Mesh* mesh
 
     shader->setUniform("u_color", material->color);
     shader->setUniform("u_emissive_factor", material->emissive_factor);
+    shader->setUniform("u_use_dither", use_dither);
     
     //upload textures
     uploadTextures(material, shader);

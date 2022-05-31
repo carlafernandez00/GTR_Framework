@@ -252,6 +252,8 @@ void Application::renderDebugGUI(void)
     ImGui::Checkbox("Show SSAO", &renderer->show_ssao);
     ImGui::Checkbox("Use SSAO", &renderer->use_ssao);
     ImGui::Checkbox("Use HRD", &renderer->use_hdr);
+    ImGui::Checkbox("Use HRD", &renderer->use_dither);
+    
     if(&renderer->use_hdr)
     {
     //Choose shader
