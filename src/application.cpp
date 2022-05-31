@@ -255,7 +255,7 @@ void Application::renderDebugGUI(void)
     if(&renderer->use_hdr)
     {
     //Choose shader
-    ImGui::Combo("Tone Mapper", (int*)&renderer->tone_mapper, "UNCHARTED2\LUMA_BASED_REINHARD\0");
+    ImGui::Combo("Tone Mapper", (int*)&renderer->tone_mapper, "UNCHARTED2\0LUMA_BASED_REINHARD\0");
     }
     
     //Choose shader
