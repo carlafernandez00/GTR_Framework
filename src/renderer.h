@@ -101,17 +101,11 @@ namespace GTR {
         // set render call vector
         void setRenderCallVector(const Matrix44& model, GTR::Node* node, Camera* camera);
         
+        // render forward
+        void renderForward(Camera* camera, GTR::Scene* scene, std::vector<RenderCall> render_vector);
+        
 		//to render one mesh given its material and transformation matrix
 		void renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Material* material, Camera* camera);
-        
-        //to render one mesh given its material and transformation matrix
-        void renderMeshWithMaterialToGBuffers(const Matrix44 model, Mesh* mesh, GTR::Material* material, Camera* camera);
-        
-        // to upload textures to shader
-        void uploadTextures(GTR::Material* material, Shader* shader);
-        
-        // to upload lights to shader
-        void uploadLight(LightEntity* light, Shader* shader);
         
         // to render lights -> multipass mode
         void renderLightMultiPass(Mesh* mesh, Shader* shader);
@@ -119,26 +113,32 @@ namespace GTR {
         // to render lights -> singlepass mode
         void renderLightSinglePass(Mesh* mesh, GTR::Material* material, Shader* shader);
         
-        // to generate shadow map
-        void generateShadowmap(LightEntity* light);
-        
-        //to render shadowmap texture
-        void renderFlatMesh(const Matrix44 model, Mesh* mesh, GTR::Material* material, Camera* camera);
-        
-        // to show shadowmap
-        void showShadowmap(LightEntity* light);
-        
-        // render forward
-        void renderForward(Camera* camera, GTR::Scene* scene, std::vector<RenderCall> render_vector);
-        
         // render deferred
         void renderDeferred(Camera* camera, GTR::Scene* scene, std::vector<RenderCall> render_vector);
         
-        // render illumitation for deferred
-        void illuminationDeferred(Camera* camera, GTR::Scene* scene);
+        //to render one mesh given its material and transformation matrix
+        void renderMeshWithMaterialToGBuffers(const Matrix44 model, Mesh* mesh, GTR::Material* material, Camera* camera);
         
         //render SSAO
         void renderSSAO(Camera* camera, GTR::Scene* scene);
+        
+        // render illumitation for deferred
+        void illuminationDeferred(Camera* camera, GTR::Scene* scene);
+
+        // to upload textures to shader
+        void uploadTextures(GTR::Material* material, Shader* shader);
+        
+        // to upload lights to shader
+        void uploadLight(LightEntity* light, Shader* shader);
+        
+        //to render a flat mesh
+        void renderFlatMesh(const Matrix44 model, Mesh* mesh, GTR::Material* material, Camera* camera);
+        
+        // to generate shadow map
+        void generateShadowmap(LightEntity* light);
+        
+        // to show shadowmap
+        void showShadowmap(LightEntity* light);
 
 	};
     

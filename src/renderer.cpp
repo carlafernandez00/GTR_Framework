@@ -16,7 +16,7 @@ using namespace GTR;
 
 
 GTR::Renderer::Renderer(){
-    rendering_mode = eRenderingMode::SINGLEPASS;
+    rendering_mode = eRenderingMode::MULTIPASS;
     rendering_pipeline = FORWARD;
     
     
@@ -26,7 +26,7 @@ GTR::Renderer::Renderer(){
 
     // usage bools
     use_ssao = false;
-    use_blur_ssao = true;
+    use_blur_ssao = false;
     use_hdr = false;
     use_dither = false;
     pbr = false;
@@ -126,6 +126,252 @@ void Renderer::renderScene(GTR::Scene* scene, Camera* camera)
     //glViewport(0, 0, Application::instance->window_width, Application::instance->window_height);
 }
 
+//renders all the prefab
+void Renderer::renderPrefab(const Matrix44& model, GTR::Prefab* prefab, Camera* camera)
+{
+    assert(prefab && "PREFAB IS NULL");
+    //assign the model to the root node
+    //renderNode(model, &prefab->root, camera);
+    setRenderCallVector(model, &prefab->root, camera);
+}
+
+//renders a node of the prefab and its children
+void Renderer::renderNode(const Matrix44& prefab_model, GTR::Node* node, Camera* camera)
+{
+    if (!node->visible)
+        return;
+
+    //compute global matrix
+    Matrix44 node_model = node->getGlobalMatrix(true) * prefab_model;
+
+    //does this node have a mesh? then we must render it
+    if (node->mesh && node->material)
+    {
+        //compute the bounding box of the object in world space (by using the mesh bounding box transformed to world space)
+        BoundingBox world_bounding = transformBoundingBox(node_model,node->mesh->box);
+        
+        //if bounding box is inside the camera frustum then the object is probably visible
+        if (camera->testBoxInFrustum(world_bounding.center, world_bounding.halfsize) )
+        {
+            //render node mesh
+            renderMeshWithMaterial( node_model, node->mesh, node->material, camera );
+            //node->mesh->renderBounding(node_model, true);
+        }
+    }
+
+    //iterate recursively with children
+    for (int i = 0; i < node->children.size(); ++i)
+        renderNode(prefab_model, node->children[i], camera);
+}
+
+// set render call vector
+void Renderer::setRenderCallVector(const Matrix44& prefab_model, GTR::Node* node, Camera* camera)
+{
+    if (!node->visible)
+        return;
+
+    //compute global matrix
+    Matrix44 node_model = node->getGlobalMatrix(true) * prefab_model;
+
+    //does this node have a mesh? then we must render it
+    if (node->mesh && node->material)
+    {
+        //compute the bounding box of the object in world space (by using the mesh bounding box transformed to world space)
+        BoundingBox world_bounding = transformBoundingBox(node_model,node->mesh->box);
+        
+        // set RenderCall object for each node and store it in the render_call_vector
+        RenderCall rc;
+        rc.material = node->material;
+        rc.mesh = node->mesh;
+        rc.node_model = node_model;
+        rc.world_bounding = world_bounding;
+        
+        // let's compute the distance to the camera
+        Vector3 center_node = world_bounding.center;
+        rc.camera_distance = camera->eye.distance(center_node);
+        
+        rc.camera = camera;
+        
+        // store node information
+        this->render_call_vector.push_back(rc);
+
+    }
+
+    //iterate recursively with children
+    for (int i = 0; i < node->children.size(); ++i)
+    setRenderCallVector(prefab_model, node->children[i], camera);
+}
+
+// forward
+void Renderer::renderForward(Camera* camera, GTR::Scene* scene, std::vector<RenderCall> render_vector){
+    //set the clear color (the background color)
+    glClearColor(scene->background_color.x, scene->background_color.y, scene->background_color.z, 1.0);
+
+    // Clear the color and the depth buffer
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    checkGLErrors();
+ 
+    for(int i=0; i < render_vector.size(); ++i){
+        RenderCall& rc = render_vector[i];
+        //if bounding box is inside the camera frustum then the object is probably visible
+        if (camera->testBoxInFrustum(rc.world_bounding.center, rc.world_bounding.halfsize) )
+        {
+            renderMeshWithMaterial( rc.node_model, rc.mesh, rc.material, rc.camera);
+        }
+    }
+}
+
+//renders a mesh given its transform and material
+void Renderer::renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Material* material, Camera* camera)
+{
+    //in case there is nothing to do
+    if (!mesh || !mesh->getNumVertices() || !material )
+        return;
+    assert(glGetError() == GL_NO_ERROR);
+
+    //define locals to simplify coding
+    Shader* shader = NULL;
+    GTR::Scene* scene = GTR::Scene::instance;
+    
+    
+    //select the blending
+    if (material->alpha_mode == GTR::eAlphaMode::BLEND)
+    {
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    }
+    else
+        glDisable(GL_BLEND);
+    
+    //select if render both sides of the triangles
+    if(material->two_sided)
+        glDisable(GL_CULL_FACE);
+    else
+        glEnable(GL_CULL_FACE);
+    assert(glGetError() == GL_NO_ERROR);
+
+    //chose a shader
+    if(this->rendering_mode == eRenderingMode::TEXTURE)
+        shader = Shader::Get("texture");
+    else if(this->rendering_mode == eRenderingMode::MULTIPASS)
+        shader = Shader::Get("light");
+    else if(this->rendering_mode == eRenderingMode::SINGLEPASS)
+        shader = Shader::Get("single_light");
+    
+
+    assert(glGetError() == GL_NO_ERROR);
+
+    //no shader? then nothing to render
+    if (!shader)
+        return;
+    shader->enable();
+
+    //upload uniforms
+    shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
+    shader->setUniform("u_camera_position", camera->eye);
+    shader->setUniform("u_model", model);
+    float t = getTime();
+    shader->setUniform("u_time", t );
+
+    shader->setUniform("u_color", material->color);
+    shader->setUniform("u_emissive_factor", material->emissive_factor);
+    
+    //upload textures
+    uploadTextures(material, shader);
+    
+
+    //this is used to say which is the alpha threshold to what we should not paint a pixel on the screen (to cut polygons according to texture alpha)
+    shader->setUniform("u_alpha_cutoff", material->alpha_mode == GTR::eAlphaMode::MASK ? material->alpha_cutoff : 0);
+    
+    //do the draw call that renders the mesh into the screen
+    if(this->rendering_mode ==  eRenderingMode::TEXTURE) mesh->render(GL_TRIANGLES);
+    
+    
+    //render lights
+    if(this->rendering_mode == eRenderingMode::MULTIPASS || this->rendering_mode == eRenderingMode::SINGLEPASS){
+        shader->setUniform("u_ambient_light", scene->ambient_light);  //ambient light
+        shader->setUniform("u_pbr", pbr);
+        
+        // show scene elements even if there's no light
+        if(this->lights.size() == 0) {
+            shader->setUniform("u_light_color", Vector3(0,0,0));
+            mesh->render(GL_TRIANGLES);
+        }
+        // if there are more lights
+        else{
+            if(this->rendering_mode == MULTIPASS){
+                renderLightMultiPass(mesh, shader);}
+            else{
+                renderLightSinglePass(mesh, material, shader);}
+        }
+    }
+
+    //disable shader
+    shader->disable();
+
+    //set the render state as it was before to avoid problems with future renders
+    glDisable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+}
+
+void Renderer::renderLightMultiPass(Mesh* mesh, Shader* shader){
+    
+    glDepthFunc(GL_LEQUAL);   //para que el z-buffer deje pasar todas las luces
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE); //sumar el color ya pintado con la luz que le llegue
+    
+    //iterate all lights
+    for(int i = 0; i < this->lights.size(); ++i){
+        LightEntity* light = lights[i];
+        uploadLight(light, shader);
+        
+        //do the draw call that renders the mesh into the screen
+        mesh->render(GL_TRIANGLES);
+        
+        // enable blending
+        glEnable(GL_BLEND);
+    
+        // to consider ambient light one time
+        shader->setUniform("u_ambient_light", Vector3(0,0,0));
+    }
+    
+    //set the render state as it was before to avoid problems with future renders
+    glDepthFunc(GL_LESS);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glFrontFace(GL_CCW);
+}
+
+void Renderer::renderLightSinglePass(Mesh* mesh, GTR::Material* material, Shader* shader){
+    const int max_lights = 8;
+    Vector3 light_position[max_lights];
+    Vector3 light_color[max_lights];
+    float light_max_dist[max_lights];
+    eLightType light_type[max_lights];
+    Vector3 light_vector[max_lights];
+    Vector3 light_cone[max_lights];
+    
+    for(int i = 0; i < this->lights.size(); ++i){
+        light_position[i] = lights[i]->model * Vector3();
+        light_color[i] = lights[i]->color * lights[i]->intensity;
+        light_max_dist[i] = lights[i]->max_dist;
+        light_type[i] = lights[i]->light_type;
+        light_vector[i] = lights[i]->model.rotateVector(Vector3(0,0,-1));
+        light_cone[i] = Vector3(lights[i]->cone_angle, lights[i]->cone_exp, cos(lights[i]->cone_angle*DEG2RAD));
+    }
+    
+    //upload uniforms to shader
+    shader->setUniform1("u_num_lights", (int)this->lights.size());
+    shader->setUniform3Array("u_light_pos",(float*)light_position, max_lights);
+    shader->setUniform3Array("u_light_color",(float*)&light_color, max_lights);
+    shader->setUniform1Array("u_light_max_dist",(float*)&light_max_dist, max_lights);
+    shader->setUniform1Array("u_light_type", (int*)&light_type, max_lights);
+    shader->setUniform3Array("u_light_vec",(float*)&light_vector, max_lights);
+    shader->setUniform3Array("u_light_cone",(float*)&light_cone, max_lights);
+    
+    //do the draw call that renders the mesh into the screen
+    mesh->render(GL_TRIANGLES);
+}
+
+// deferred
 void Renderer::renderDeferred(Camera* camera, GTR::Scene* scene, std::vector<RenderCall> render_vector){
     // Render GBuffers -> propiedades de cada objeto las guardamos en distintas texturas
     float w = Application::instance->window_width;
@@ -223,6 +469,73 @@ void Renderer::renderDeferred(Camera* camera, GTR::Scene* scene, std::vector<Ren
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glDepthFunc(GL_LESS);
 }
+
+// render to gbuffers
+void Renderer::renderMeshWithMaterialToGBuffers(const Matrix44 model, Mesh* mesh, GTR::Material* material, Camera* camera)
+{
+    //in case the material has transparencies
+    if(!use_dither)
+        if (material->alpha_mode == eAlphaMode::BLEND)
+            return;
+    
+    //in case there is nothing to do
+    if (!mesh || !mesh->getNumVertices() || !material )
+        return;
+    assert(glGetError() == GL_NO_ERROR);
+    
+    //define locals to simplify coding
+    Shader* shader = NULL;
+    
+    // no blending
+    glDisable(GL_BLEND);
+    
+    //select if render both sides of the triangles
+    if(material->two_sided)
+        glDisable(GL_CULL_FACE);
+    else
+        glEnable(GL_CULL_FACE);
+    assert(glGetError() == GL_NO_ERROR);
+
+    //chose shader
+    shader = Shader::Get("gbuffers");
+    
+    assert(glGetError() == GL_NO_ERROR);
+
+    //no shader? then nothing to render
+    if (!shader)
+        return;
+    shader->enable();
+
+    //upload uniforms
+    shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
+    shader->setUniform("u_camera_position", camera->eye);
+    shader->setUniform("u_model", model);
+    float t = getTime();
+    shader->setUniform("u_time", t );
+
+    shader->setUniform("u_color", material->color);
+    shader->setUniform("u_emissive_factor", material->emissive_factor);
+    shader->setUniform("u_use_dither", use_dither);
+    
+    //upload textures
+    uploadTextures(material, shader);
+
+    //this is used to say which is the alpha threshold to what we should not paint a pixel on the screen (to cut polygons according to texture alpha)
+    shader->setUniform("u_alpha_cutoff", material->alpha_mode == GTR::eAlphaMode::MASK ? material->alpha_cutoff : 0);
+    
+    //do the draw call that renders the mesh into the screen
+    mesh->render(GL_TRIANGLES);
+    
+    //disable shader
+    shader->disable();
+
+    //set the render state as it was before to avoid problems with future renders
+    glDisable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDepthFunc(GL_LESS);
+}
+
+// compute ssao and ssao+
 void Renderer::renderSSAO(Camera* camera, GTR::Scene* scene){
     ssao_fbo->bind();
     
@@ -287,6 +600,7 @@ void Renderer::renderSSAO(Camera* camera, GTR::Scene* scene){
     glDepthFunc(GL_LESS);
 }
 
+// render illumination deferred
 void Renderer::illuminationDeferred(Camera* camera, GTR::Scene* scene){
     
     int w = Application::instance->window_width;
@@ -427,258 +741,8 @@ void Renderer::illuminationDeferred(Camera* camera, GTR::Scene* scene){
     glDepthFunc(GL_LESS);
 }
 
-void Renderer::renderForward(Camera* camera, GTR::Scene* scene, std::vector<RenderCall> render_vector){
-    //set the clear color (the background color)
-    glClearColor(scene->background_color.x, scene->background_color.y, scene->background_color.z, 1.0);
 
-    // Clear the color and the depth buffer
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    checkGLErrors();
- 
-    for(int i=0; i < render_vector.size(); ++i){
-        RenderCall& rc = render_vector[i];
-        //if bounding box is inside the camera frustum then the object is probably visible
-        if (camera->testBoxInFrustum(rc.world_bounding.center, rc.world_bounding.halfsize) )
-        {
-            renderMeshWithMaterial( rc.node_model, rc.mesh, rc.material, rc.camera);
-        }
-    }
-}
-
-//renders all the prefab
-void Renderer::renderPrefab(const Matrix44& model, GTR::Prefab* prefab, Camera* camera)
-{
-	assert(prefab && "PREFAB IS NULL");
-	//assign the model to the root node
-	//renderNode(model, &prefab->root, camera);
-    setRenderCallVector(model, &prefab->root, camera);
-}
-
-//renders a node of the prefab and its children
-void Renderer::renderNode(const Matrix44& prefab_model, GTR::Node* node, Camera* camera)
-{
-	if (!node->visible)
-		return;
-
-	//compute global matrix
-	Matrix44 node_model = node->getGlobalMatrix(true) * prefab_model;
-
-	//does this node have a mesh? then we must render it
-	if (node->mesh && node->material)
-	{
-		//compute the bounding box of the object in world space (by using the mesh bounding box transformed to world space)
-		BoundingBox world_bounding = transformBoundingBox(node_model,node->mesh->box);
-		
-		//if bounding box is inside the camera frustum then the object is probably visible
-		if (camera->testBoxInFrustum(world_bounding.center, world_bounding.halfsize) )
-		{
-			//render node mesh
-			renderMeshWithMaterial( node_model, node->mesh, node->material, camera );
-			//node->mesh->renderBounding(node_model, true);
-		}
-	}
-
-	//iterate recursively with children
-	for (int i = 0; i < node->children.size(); ++i)
-		renderNode(prefab_model, node->children[i], camera);
-}
-
-// set render call vector
-void Renderer::setRenderCallVector(const Matrix44& prefab_model, GTR::Node* node, Camera* camera)
-{
-    if (!node->visible)
-        return;
-
-    //compute global matrix
-    Matrix44 node_model = node->getGlobalMatrix(true) * prefab_model;
-
-    //does this node have a mesh? then we must render it
-    if (node->mesh && node->material)
-    {
-        //compute the bounding box of the object in world space (by using the mesh bounding box transformed to world space)
-        BoundingBox world_bounding = transformBoundingBox(node_model,node->mesh->box);
-        
-        // set RenderCall object for each node and store it in the render_call_vector
-        RenderCall rc;
-        rc.material = node->material;
-        rc.mesh = node->mesh;
-        rc.node_model = node_model;
-        rc.world_bounding = world_bounding;
-        
-        // let's compute the distance to the camera
-        Vector3 center_node = world_bounding.center;
-        rc.camera_distance = camera->eye.distance(center_node);
-        
-        rc.camera = camera;
-        
-        // store node information
-        this->render_call_vector.push_back(rc);
-
-    }
-
-    //iterate recursively with children
-    for (int i = 0; i < node->children.size(); ++i)
-    setRenderCallVector(prefab_model, node->children[i], camera);
-}
-
-
-void Renderer::renderMeshWithMaterialToGBuffers(const Matrix44 model, Mesh* mesh, GTR::Material* material, Camera* camera)
-{
-    //in case the material has transparencies
-    if(!use_dither)
-        if (material->alpha_mode == eAlphaMode::BLEND)
-            return;
-    
-    //in case there is nothing to do
-    if (!mesh || !mesh->getNumVertices() || !material )
-        return;
-    assert(glGetError() == GL_NO_ERROR);
-    
-    //define locals to simplify coding
-    Shader* shader = NULL;
-    
-    // no blending
-    glDisable(GL_BLEND);
-    
-    //select if render both sides of the triangles
-    if(material->two_sided)
-        glDisable(GL_CULL_FACE);
-    else
-        glEnable(GL_CULL_FACE);
-    assert(glGetError() == GL_NO_ERROR);
-
-    //chose shader
-    shader = Shader::Get("gbuffers");
-    
-    assert(glGetError() == GL_NO_ERROR);
-
-    //no shader? then nothing to render
-    if (!shader)
-        return;
-    shader->enable();
-
-    //upload uniforms
-    shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
-    shader->setUniform("u_camera_position", camera->eye);
-    shader->setUniform("u_model", model);
-    float t = getTime();
-    shader->setUniform("u_time", t );
-
-    shader->setUniform("u_color", material->color);
-    shader->setUniform("u_emissive_factor", material->emissive_factor);
-    shader->setUniform("u_use_dither", use_dither);
-    
-    //upload textures
-    uploadTextures(material, shader);
-
-    //this is used to say which is the alpha threshold to what we should not paint a pixel on the screen (to cut polygons according to texture alpha)
-    shader->setUniform("u_alpha_cutoff", material->alpha_mode == GTR::eAlphaMode::MASK ? material->alpha_cutoff : 0);
-    
-    //do the draw call that renders the mesh into the screen
-    mesh->render(GL_TRIANGLES);
-    
-    //disable shader
-    shader->disable();
-
-    //set the render state as it was before to avoid problems with future renders
-    glDisable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glDepthFunc(GL_LESS);
-}
-
-//renders a mesh given its transform and material
-void Renderer::renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Material* material, Camera* camera)
-{
-	//in case there is nothing to do
-	if (!mesh || !mesh->getNumVertices() || !material )
-		return;
-    assert(glGetError() == GL_NO_ERROR);
-
-	//define locals to simplify coding
-	Shader* shader = NULL;
-    GTR::Scene* scene = GTR::Scene::instance;
-    
-    
-    //select the blending
-    if (material->alpha_mode == GTR::eAlphaMode::BLEND)
-    {
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    }
-    else
-        glDisable(GL_BLEND);
-    
-	//select if render both sides of the triangles
-	if(material->two_sided)
-		glDisable(GL_CULL_FACE);
-	else
-		glEnable(GL_CULL_FACE);
-    assert(glGetError() == GL_NO_ERROR);
-
-	//chose a shader
-    if(this->rendering_mode == eRenderingMode::TEXTURE)
-        shader = Shader::Get("texture");
-    else if(this->rendering_mode == eRenderingMode::MULTIPASS)
-        shader = Shader::Get("light");
-    else if(this->rendering_mode == eRenderingMode::SINGLEPASS)
-        shader = Shader::Get("single_light");
-    
-
-    assert(glGetError() == GL_NO_ERROR);
-
-	//no shader? then nothing to render
-	if (!shader)
-		return;
-	shader->enable();
-
-	//upload uniforms
-	shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
-	shader->setUniform("u_camera_position", camera->eye);
-	shader->setUniform("u_model", model);
-	float t = getTime();
-	shader->setUniform("u_time", t );
-
-	shader->setUniform("u_color", material->color);
-    shader->setUniform("u_emissive_factor", material->emissive_factor);
-    
-    //upload textures
-    uploadTextures(material, shader);
-    
-
-	//this is used to say which is the alpha threshold to what we should not paint a pixel on the screen (to cut polygons according to texture alpha)
-	shader->setUniform("u_alpha_cutoff", material->alpha_mode == GTR::eAlphaMode::MASK ? material->alpha_cutoff : 0);
-    
-    //do the draw call that renders the mesh into the screen
-    if(this->rendering_mode ==  eRenderingMode::TEXTURE) mesh->render(GL_TRIANGLES);
-    
-    
-    //render lights
-    if(this->rendering_mode == eRenderingMode::MULTIPASS || this->rendering_mode == eRenderingMode::SINGLEPASS){
-        shader->setUniform("u_ambient_light", scene->ambient_light);  //ambient light
-        shader->setUniform("u_pbr", pbr);
-        
-        // show scene elements even if there's no light
-        if(this->lights.size() == 0) {
-            shader->setUniform("u_light_color", Vector3(0,0,0));
-            mesh->render(GL_TRIANGLES);
-        }
-        // if there are more lights
-        else{
-            if(this->rendering_mode == MULTIPASS){
-                renderLightMultiPass(mesh, shader);}
-            else{
-                renderLightSinglePass(mesh, material, shader);}
-        }
-    }
-
-	//disable shader
-	shader->disable();
-
-	//set the render state as it was before to avoid problems with future renders
-	glDisable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-}
-
+// upload textures to shader
 void Renderer::uploadTextures(GTR::Material* material, Shader* shader)
 {
     //define locals to simplify coding
@@ -716,6 +780,7 @@ void Renderer::uploadTextures(GTR::Material* material, Shader* shader)
     
 }
 
+// upload lights to shader
 void Renderer::uploadLight(LightEntity* light, Shader* shader)
 {
     shader->setUniform("u_light_color", light->color * light->intensity);
@@ -741,88 +806,6 @@ void Renderer::uploadLight(LightEntity* light, Shader* shader)
         shader->setUniform("u_light_cast_shadows", 0);
 }
 
-std::vector<Vector3> GTR::generateSpherePoints(int num, float radius, bool hemi)
-{
-    std::vector<Vector3> points;
-    points.resize(num);
-    for (int i = 0; i < num; i += 1)
-    {
-        Vector3& p = points[i];
-        float u = random(1.0);
-        float v = random(1.0);
-        float theta = u * 2.0 * PI;
-        float phi = acos(2.0 * v - 1.0);
-        float r = cbrt( random(1.0) * 0.9 + 0.1 ) * radius;
-        float sinTheta = sin(theta);
-        float cosTheta = cos(theta);
-        float sinPhi = sin(phi);
-        float cosPhi = cos(phi);
-        p.x = r * sinPhi * cosTheta;
-        p.y = r * sinPhi * sinTheta;
-        p.z = r * cosPhi;
-        if (hemi && p.z < 0)
-            p.z *= -1.0;
-    }
-    return points;
-}
-
-
-void Renderer::renderLightMultiPass(Mesh* mesh, Shader* shader){
-    
-    glDepthFunc(GL_LEQUAL);   //para que el z-buffer deje pasar todas las luces
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE); //sumar el color ya pintado con la luz que le llegue
-    
-    //iterate all lights
-    for(int i = 0; i < this->lights.size(); ++i){
-        LightEntity* light = lights[i];
-        uploadLight(light, shader);
-        
-        //do the draw call that renders the mesh into the screen
-        mesh->render(GL_TRIANGLES);
-        
-        // enable blending
-        glEnable(GL_BLEND);
-    
-        // to consider ambient light one time
-        shader->setUniform("u_ambient_light", Vector3(0,0,0));
-    }
-    
-    //set the render state as it was before to avoid problems with future renders
-    glDepthFunc(GL_LESS);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glFrontFace(GL_CCW);
-}
-
-void Renderer::renderLightSinglePass(Mesh* mesh, GTR::Material* material, Shader* shader){
-    const int max_lights = 8;
-    Vector3 light_position[max_lights];
-    Vector3 light_color[max_lights];
-    float light_max_dist[max_lights];
-    eLightType light_type[max_lights];
-    Vector3 light_vector[max_lights];
-    Vector3 light_cone[max_lights];
-    
-    for(int i = 0; i < this->lights.size(); ++i){
-        light_position[i] = lights[i]->model * Vector3();
-        light_color[i] = lights[i]->color * lights[i]->intensity;
-        light_max_dist[i] = lights[i]->max_dist;
-        light_type[i] = lights[i]->light_type;
-        light_vector[i] = lights[i]->model.rotateVector(Vector3(0,0,-1));
-        light_cone[i] = Vector3(lights[i]->cone_angle, lights[i]->cone_exp, cos(lights[i]->cone_angle*DEG2RAD));
-    }
-    
-    //upload uniforms to shader
-    shader->setUniform1("u_num_lights", (int)this->lights.size());
-    shader->setUniform3Array("u_light_pos",(float*)light_position, max_lights);
-    shader->setUniform3Array("u_light_color",(float*)&light_color, max_lights);
-    shader->setUniform1Array("u_light_max_dist",(float*)&light_max_dist, max_lights);
-    shader->setUniform1Array("u_light_type", (int*)&light_type, max_lights);
-    shader->setUniform3Array("u_light_vec",(float*)&light_vector, max_lights);
-    shader->setUniform3Array("u_light_cone",(float*)&light_cone, max_lights);
-    
-    //do the draw call that renders the mesh into the screen
-    mesh->render(GL_TRIANGLES);
-}
 
 void GTR::Renderer::renderFlatMesh(const Matrix44 model, Mesh* mesh, GTR::Material* material, Camera* camera)
 {
@@ -969,4 +952,30 @@ Texture* GTR::CubemapFromHDRE(const char* filename)
 					(Uint8**)hdre->getFacesh(i), GL_RGBA16F, i);
 		}
 	return texture;
+}
+
+// generate sphere points
+std::vector<Vector3> GTR::generateSpherePoints(int num, float radius, bool hemi)
+{
+    std::vector<Vector3> points;
+    points.resize(num);
+    for (int i = 0; i < num; i += 1)
+    {
+        Vector3& p = points[i];
+        float u = random(1.0);
+        float v = random(1.0);
+        float theta = u * 2.0 * PI;
+        float phi = acos(2.0 * v - 1.0);
+        float r = cbrt( random(1.0) * 0.9 + 0.1 ) * radius;
+        float sinTheta = sin(theta);
+        float cosTheta = cos(theta);
+        float sinPhi = sin(phi);
+        float cosPhi = cos(phi);
+        p.x = r * sinPhi * cosTheta;
+        p.y = r * sinPhi * sinTheta;
+        p.z = r * cosPhi;
+        if (hemi && p.z < 0)
+            p.z *= -1.0;
+    }
+    return points;
 }
