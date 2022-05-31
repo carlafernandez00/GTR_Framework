@@ -73,6 +73,7 @@ namespace GTR {
         bool use_blur_ssao;
         bool use_hdr;
         bool use_dither;
+        bool pbr;
         
         FBO* gbuffers_fbo;
         FBO* illumination_fbo;

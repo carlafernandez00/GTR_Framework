@@ -323,7 +323,6 @@ void main()
 
 \instanced.vs
 
-
 attribute vec3 a_vertex;
 attribute vec3 a_normal;
 attribute vec2 a_coord;
@@ -476,6 +475,8 @@ uniform sampler2D u_light_shadowmap;
 uniform mat4 u_shadow_viewproj;
 uniform float u_shadow_bias;
 
+uniform int u_pbr;
+
 void main()
 {
     vec2 uv = v_uv;
@@ -483,6 +484,7 @@ void main()
     vec3 N = vec3(0,0,0);
     float shadowFactor = 1.0;
     vec3 L = vec3(0,0,0);
+    vec3 direct = vec3(1.0);
     
     // compute normal
     N = compute_normal(u_normal_texture, uv, v_normal, v_world_position);
@@ -498,8 +500,7 @@ void main()
     float occlusion = compute_occlusion(u_occlusion_texture,u_metallic_roughness_texture,uv);
     vec3 light = vec3(u_ambient_light) * occlusion; // ambient light
     
-    // compute light vector
-    
+    // --compute light vector
     //DIRECTIONAL LIGHT
     if(u_light_type == 1)
     {
@@ -529,9 +530,11 @@ void main()
     float NdotL = clamp(dot(N, L), 0.0, 1.0);
     
     //PBR
-    float metalness = texture2D(u_metallic_roughness_texture, uv).z;
-    float roughness = texture2D(u_metallic_roughness_texture, uv).y;
-    vec3 direct = compute_direct_light(u_camera_position, v_world_position, L, N, color, metalness, roughness, NdotL);
+    if(u_pbr == 1){
+        float metalness = texture2D(u_metallic_roughness_texture, uv).z;
+        float roughness = texture2D(u_metallic_roughness_texture, uv).y;
+        direct = compute_direct_light(u_camera_position, v_world_position, L, N, color, metalness, roughness, NdotL);
+    }
     
     light += (NdotL * u_light_color) * att_factor * spotFactor * shadowFactor * direct;
     
@@ -573,10 +576,13 @@ uniform int u_light_type[MAX_LIGHTS];
 uniform vec3 u_light_vec[MAX_LIGHTS];
 uniform vec3 u_light_cone[MAX_LIGHTS];
 
+uniform int u_pbr;
+
 void main()
 {
     vec2 uv = v_uv;
     vec3 N = vec3(0,0,0);
+    vec3 direct = vec3(1.0);
     
     // compute normal
     N = compute_normal(u_normal_texture, uv, v_normal, v_world_position);
@@ -628,7 +634,7 @@ void main()
             float NdotL = clamp(dot(N, L), 0.0, 1.0);
             
             //PBR
-            vec3 direct = compute_direct_light(u_camera_position, v_world_position, L, N, color, metalness, roughness, NdotL);
+            if(u_pbr == 1){direct = compute_direct_light(u_camera_position, v_world_position, L, N, color, metalness, roughness, NdotL);}
             
             light += (NdotL * u_light_color[i]) * att_factor * spotFactor * direct; // modify the amount of light
         }
@@ -762,8 +768,10 @@ uniform float u_shadow_bias;
 
 uniform vec2 u_iRes;
 uniform mat4 u_inverse_viewprojection;
+
 uniform int u_use_ssao;
 uniform int u_use_hdr;
+uniform int u_pbr;
 
 void main()
 {
@@ -771,6 +779,7 @@ void main()
     float spotFactor = 1.0;
     float shadowFactor = 1.0;
     vec3 L = vec3(0,0,0);
+    vec3 direct = vec3(1.0);
     
     // get info from extra texture
     vec4 extra = texture2D(u_extra_texture, uv);
@@ -784,10 +793,6 @@ void main()
     // get color
     vec4 color = vec4(texture2D( u_color_texture, uv ).xyz, 1.0);
     if(u_use_hdr == 1){color.xyz = degamma(color.xyz);}
-    
-    // get roughness and metalness
-    float roughness = texture2D(u_color_texture, uv).a;
-    float metalness = texture2D(u_normal_texture, uv).a;
         
     // get world position from depth
     float depth = float(texture2D( u_depth_texture, uv ).x);
@@ -805,8 +810,7 @@ void main()
     // ambient light considering occlusions
     vec3 light = vec3(u_ambient_light) * occlusion; // ambient light + occlusions
     
-    // compute light vector
-    
+    // --compute light vector
     //DIRECTIONAL LIGHT
     if(u_light_type == 1)
     {
@@ -834,7 +838,13 @@ void main()
         shadowFactor = get_shadow_factor(u_shadow_viewproj, world_position,  u_shadow_bias, u_light_shadowmap,u_light_type);
 
     float NdotL = clamp(dot(N, L), 0.0, 1.0);
-    vec3 direct = compute_direct_light(u_camera_pos, world_position, L, N, color, metalness, roughness, NdotL);
+    // PBR
+    if(u_pbr == 1){
+        // get roughness and metalness
+        float roughness = texture2D(u_color_texture, uv).a;
+        float metalness = texture2D(u_normal_texture, uv).a;
+        direct = compute_direct_light(u_camera_pos, world_position, L, N, color, metalness, roughness, NdotL);
+        }
         
     light += (NdotL * u_light_color) * att_factor * spotFactor * shadowFactor * direct;
     
@@ -876,8 +886,10 @@ uniform float u_shadow_bias;
 
 uniform vec2 u_iRes;
 uniform mat4 u_inverse_viewprojection;
+
 uniform int u_use_ssao;
 uniform int u_use_hdr;
+uniform int u_pbr;
 
 void main()
 {
@@ -885,16 +897,13 @@ void main()
     float spotFactor = 1.0;
     float shadowFactor = 1.0;
     vec3 L = vec3(0,0,0);
+    vec3 direct = vec3(1.0);
     
     // get world position from depth
     float depth = float(texture2D( u_depth_texture, uv ).x);
     vec4 screen_pos = vec4( uv.x *2.0 -1.0, uv.y * 2.0 -1.0, depth*2.0-1.0, 1.0 ); // conv todo de -1 a 1
     vec4 proj_worldpos = u_inverse_viewprojection * screen_pos;
     vec3 world_position = proj_worldpos.xyz / proj_worldpos.w ;
-    
-    // get roughness and metalness
-    float roughness = texture2D(u_color_texture, uv).a;
-    float metalness = texture2D(u_normal_texture, uv).a;
     
     // get info from extra texture
     vec4 extra = texture2D(u_extra_texture, uv);
@@ -919,8 +928,7 @@ void main()
     // ambient light considering occlusions
     vec3 light = vec3(u_ambient_light) * occlusion; // ambient light + occlusions
     
-    // compute light vector
-    
+    // -- compute light vector
     //DIRECTIONAL LIGHT
     if(u_light_type == 1)
     {
@@ -948,9 +956,16 @@ void main()
         shadowFactor = get_shadow_factor(u_shadow_viewproj, world_position,  u_shadow_bias, u_light_shadowmap,u_light_type);
 
     float NdotL = clamp(dot(N, L), 0.0, 1.0);
-    vec3 direct = compute_direct_light(u_camera_pos, world_position, L, N, color, metalness, roughness, NdotL);
+    // PBR
+    if(u_pbr == 1){
+        // get roughness and metalness
+        float roughness = texture2D(u_color_texture, uv).a;
+        float metalness = texture2D(u_normal_texture, uv).a;
+        direct = compute_direct_light(u_camera_pos, world_position, L, N, color, metalness, roughness, NdotL);
     
-    light += (NdotL * u_light_color) * att_factor * spotFactor * shadowFactor; // modify the amount of light
+    }
+    
+    light += (NdotL * u_light_color) * att_factor * spotFactor * shadowFactor * direct; // modify the amount of light
     
     color.xyz *= light;
     color.xyz += emissive; // add emissive light

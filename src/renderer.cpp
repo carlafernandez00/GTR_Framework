@@ -16,8 +16,8 @@ using namespace GTR;
 
 
 GTR::Renderer::Renderer(){
-    rendering_mode = eRenderingMode::MULTIPASS;
-    rendering_pipeline = DEFERRED;
+    rendering_mode = eRenderingMode::SINGLEPASS;
+    rendering_pipeline = FORWARD;
     tone_mapper = LUMA_BASED_REINHARD;
     
     render_shadowmaps = true;
@@ -26,9 +26,10 @@ GTR::Renderer::Renderer(){
     show_scene = true;
     
     use_ssao = false;
-    use_blur_ssao = true;
-    use_hdr = true;
-    use_dither = true;
+    use_blur_ssao = false;
+    use_hdr = false;
+    use_dither = false;
+    pbr = false;
     
     float w = Application::instance->window_width;
     float h = Application::instance->window_height;
@@ -322,6 +323,7 @@ void Renderer::illuminationDeferred(Camera* camera, GTR::Scene* scene){
     shader->setUniform("u_ambient_light", Vector3(0,0,0));  // consider ambient light once
     shader->setUniform("u_use_ssao", use_ssao);
     shader->setUniform("u_use_hdr", use_hdr);
+    shader->setUniform("u_pbr", pbr);
     
     // Render point and spot lights
     glEnable(GL_CULL_FACE);
@@ -378,6 +380,7 @@ void Renderer::illuminationDeferred(Camera* camera, GTR::Scene* scene){
     shader_quad->setUniform("u_ambient_light", scene->ambient_light);  //ambient light
     shader_quad->setUniform("u_use_ssao", use_ssao);
     shader_quad->setUniform("u_use_hdr", use_hdr);
+    shader_quad->setUniform("u_pbr", pbr);
     
     // render directional lights
     glEnable(GL_BLEND);
@@ -642,6 +645,7 @@ void Renderer::renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Mat
     //render lights
     if(this->rendering_mode == eRenderingMode::MULTIPASS || this->rendering_mode == eRenderingMode::SINGLEPASS){
         shader->setUniform("u_ambient_light", scene->ambient_light);  //ambient light
+        shader->setUniform("u_pbr", pbr);
         
         // show scene elements even if there's no light
         if(this->lights.size() == 0) {

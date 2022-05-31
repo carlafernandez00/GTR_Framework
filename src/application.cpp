@@ -253,7 +253,9 @@ void Application::renderDebugGUI(void)
     ImGui::Checkbox("Use SSAO", &renderer->use_ssao);
     ImGui::Checkbox("Use SSAO+", &renderer->use_blur_ssao);
     ImGui::Checkbox("Use HRD", &renderer->use_hdr);
-    ImGui::Checkbox("Use HRD", &renderer->use_dither);
+    ImGui::Checkbox("Dithering", &renderer->use_dither);
+    ImGui::Checkbox("Use PBR", &renderer->pbr);
+    ImGui::Checkbox("Show Scene", &renderer->show_scene);
     
     if(&renderer->use_hdr)
     {
