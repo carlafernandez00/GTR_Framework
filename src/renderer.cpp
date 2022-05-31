@@ -62,7 +62,6 @@ struct sortRCVector{
     }
 };
 
-
 void Renderer::renderScene(GTR::Scene* scene, Camera* camera)
 {
     //reset vectors
