@@ -16,8 +16,8 @@ using namespace GTR;
 
 
 GTR::Renderer::Renderer(){
-    rendering_mode = eRenderingMode::MULTIPASS;
-    rendering_pipeline = FORWARD;
+    rendering_mode = eRenderingMode::SINGLEPASS;
+    rendering_pipeline = DEFERRED;
     
     
     // show options
@@ -30,6 +30,9 @@ GTR::Renderer::Renderer(){
     use_hdr = false;
     use_dither = false;
     pbr = false;
+    show_probes = true;
+    add_irradiance = true;
+    interpolate_irradiance = true;
     tone_mapper = LUMA_BASED_REINHARD;
     
     float w = Application::instance->window_width;
@@ -48,6 +51,24 @@ GTR::Renderer::Renderer(){
     
     blur_ssao_fbo = new FBO();
     blur_ssao_fbo->create(w, h, 1, GL_RGB, GL_UNSIGNED_BYTE, false);
+    
+    irr_fbo = new FBO();
+    irr_fbo->create(64, 64, 1, GL_RGB, GL_FLOAT);
+    
+    // probes variables
+    probes_texture = NULL;
+    
+    dim = Vector3(10, 4, 10);
+    start_pos = Vector3(-300, 5, -400);
+    end_pos = Vector3(300, 250, 400);
+    
+    delta = (end_pos - start_pos);
+    delta.x /= (dim.x - 1);
+    delta.y /= (dim.y - 1);
+    delta.z /= (dim.z - 1);
+    
+    irr_normal_distance = 0.1;
+    probe.pos.set(90,250,-380);
 }
 
 // function to sort the render calls of our scene
@@ -107,6 +128,7 @@ void Renderer::renderScene(GTR::Scene* scene, Camera* camera)
         renderForward(camera, scene, this->render_call_vector);
     else if(rendering_pipeline == DEFERRED)
         renderDeferred(camera, scene, this->render_call_vector);
+    if(show_probes == true){renderProbesGrid(5.0);}
     /*
     else if(rendering_pipeline == FORWARD_DEFERRED){
         // separete nodes between the once that have alpha and the ones that don't
@@ -216,9 +238,10 @@ void Renderer::renderForward(Camera* camera, GTR::Scene* scene, std::vector<Rend
         //if bounding box is inside the camera frustum then the object is probably visible
         if (camera->testBoxInFrustum(rc.world_bounding.center, rc.world_bounding.halfsize) )
         {
-            renderMeshWithMaterial( rc.node_model, rc.mesh, rc.material, rc.camera);
+            renderMeshWithMaterial( rc.node_model, rc.mesh, rc.material, camera);
         }
     }
+    
 }
 
 //renders a mesh given its transform and material
@@ -440,6 +463,15 @@ void Renderer::renderDeferred(Camera* camera, GTR::Scene* scene, std::vector<Ren
         glEnable(GL_DEPTH_TEST);
     }
     
+    // Show irradiance texture
+    if(show_option==IRRADIANCE_TEXTURE and probes_texture!=NULL){
+       probes_texture->toViewport();
+    }
+    
+    // Show Irradiance
+    if(show_option==IRRADIANCE and probes_texture!=NULL){displayIrradiance(camera, scene);}
+    
+    // render scene
     if(show_option==SCENE){
         illumination_fbo->bind();
         illuminationDeferred(camera, scene);
@@ -452,7 +484,7 @@ void Renderer::renderDeferred(Camera* camera, GTR::Scene* scene, std::vector<Ren
         Shader* shader_hdr = Shader::getDefaultShader("HDR_tonemapping");
         shader_hdr->enable();
         shader_hdr->setUniform("u_tonemapper", tone_mapper);
-            
+        
         illumination_fbo->color_textures[0]->toViewport(shader_hdr);
         glEnable(GL_DEPTH_TEST);
         shader_hdr->disable();
@@ -462,12 +494,14 @@ void Renderer::renderDeferred(Camera* camera, GTR::Scene* scene, std::vector<Ren
             illumination_fbo->color_textures[0]->toViewport();
             glEnable(GL_DEPTH_TEST);
         }
+        
     }
     
     //set the render state as it was before to avoid problems with future renders
     glDisable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glDepthFunc(GL_LESS);
+    
 }
 
 // render to gbuffers
@@ -648,6 +682,17 @@ void Renderer::illuminationDeferred(Camera* camera, GTR::Scene* scene){
     shader->setUniform("u_use_hdr", use_hdr);
     shader->setUniform("u_pbr", pbr);
     
+    // irradiance
+    shader->setUniform("u_probes_texture", probes_texture, 12);
+    shader->setUniform("u_irr_start", start_pos);
+    shader->setUniform("u_irr_end", end_pos);
+    shader->setUniform("u_irr_dims", dim);
+    shader->setUniform("u_irr_normal_distance",irr_normal_distance);
+    shader->setUniform("u_irr_delta", delta);
+    shader->setUniform("u_num_probes", (float)probes_texture->height);
+    shader->setUniform("u_add_irradiance", add_irradiance);
+    shader->setUniform("u_interpolate_irradiance", interpolate_irradiance);
+    
     // Render point and spot lights
     glEnable(GL_CULL_FACE);
     glFrontFace(GL_CW);
@@ -674,6 +719,7 @@ void Renderer::illuminationDeferred(Camera* camera, GTR::Scene* scene){
                 glEnable(GL_BLEND);
                 
                 shader->setUniform("u_ambient_light", Vector3(0,0,0)); // consider ambient light once
+                shader->setUniform("u_add_irradiance", false);
             }
             else{ directional_lights.push_back(light);}
         }
@@ -706,6 +752,17 @@ void Renderer::illuminationDeferred(Camera* camera, GTR::Scene* scene){
     shader_quad->setUniform("u_use_hdr", use_hdr);
     shader_quad->setUniform("u_pbr", pbr);
     
+    // irradiance
+    shader_quad->setUniform("u_probes_texture", probes_texture, 12);
+    shader_quad->setUniform("u_irr_start", start_pos);
+    shader_quad->setUniform("u_irr_end", end_pos);
+    shader_quad->setUniform("u_irr_dims", dim);
+    shader_quad->setUniform("u_irr_normal_distance",irr_normal_distance);
+    shader_quad->setUniform("u_irr_delta", delta);
+    shader_quad->setUniform("u_num_probes", (float)probes_texture->height);
+    shader_quad->setUniform("u_add_irradiance", add_irradiance);
+    shader_quad->setUniform("u_interpolate_irradiance", interpolate_irradiance);
+    
     // render directional lights
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE); //sumar el color ya pintado con la luz que le llegue
@@ -716,6 +773,7 @@ void Renderer::illuminationDeferred(Camera* camera, GTR::Scene* scene){
         
         quad->render(GL_TRIANGLES);
         shader_quad->setUniform("u_ambient_light", Vector3(0,0,0)); // consider ambient light once
+        shader_quad->setUniform("u_add_irradiance", false);
     }
     
     // in case there's no light
@@ -926,6 +984,218 @@ void GTR::Renderer::showShadowmap(LightEntity* light)
     glEnable(GL_DEPTH_TEST);
 }
 
+// to show probes
+void GTR::Renderer::renderProbesGrid(float size)
+{
+    for (int iP = 0; iP < this->probes.size(); ++iP)
+    {
+        Vector3 pos = this->probes[iP].pos;
+        float* coeffs = this->probes[iP].sh.coeffs[0].v;
+        
+        Camera* camera = Camera::current;
+        Shader* shader = Shader::Get("probe");
+        Mesh* mesh = Mesh::Get("data/meshes/sphere.obj");
+
+        glEnable(GL_CULL_FACE);
+        glDisable(GL_BLEND);
+        glEnable(GL_DEPTH_TEST);
+
+        Matrix44 model;
+        model.setTranslation(pos.x, pos.y, pos.z);
+        model.scale(size, size, size);
+
+        shader->enable();
+        shader->setUniform("u_viewprojection",camera->viewprojection_matrix);
+        shader->setUniform("u_camera_position", camera->eye);
+        shader->setUniform("u_model", model);
+        shader->setUniform3Array("u_coeffs", coeffs, 9);
+
+        mesh->render(GL_TRIANGLES);
+    }
+}
+
+void GTR::Renderer::renderProbe(float size)
+{
+        
+        Vector3 pos = this->probe.pos;
+        float* coeffs = this->probe.sh.coeffs[0].v;
+        
+        Camera* camera = Camera::current;
+        Shader* shader = Shader::Get("probe");
+        Mesh* mesh = Mesh::Get("data/meshes/sphere.obj");
+
+        glEnable(GL_CULL_FACE);
+        glDisable(GL_BLEND);
+        glEnable(GL_DEPTH_TEST);
+
+        Matrix44 model;
+        model.setTranslation(pos.x, pos.y, pos.z);
+        model.scale(size, size, size);
+
+        shader->enable();
+        shader->setUniform("u_viewprojection",camera->viewprojection_matrix);
+        shader->setUniform("u_camera_position", camera->eye);
+        shader->setUniform("u_model", model);
+        shader->setUniform3Array("u_coeffs", coeffs, 9);
+
+        mesh->render(GL_TRIANGLES);
+    
+}
+
+// to render probe in all six positions and its compute coefficients
+void GTR::Renderer::captureProbe(sProbe& probe, GTR::Scene* scene)
+{
+    FloatImage images[6]; //here we will store the six views
+    Camera cam;
+    
+    //set the fov to 90 and the aspect to 1
+    cam.setPerspective(90, 1, 0.1, 1000);
+    
+    //use singlepass rendering mode
+    eRenderingMode current = rendering_mode;
+    rendering_mode = eRenderingMode::SINGLEPASS;
+    for (int i = 0; i < 6; ++i) //for every cubemap face
+    {
+    //compute camera orientation using defined vectors
+        Vector3 eye = probe.pos;
+        Vector3 front = cubemapFaceNormals[i][2];
+        Vector3 center = probe.pos + front;
+        Vector3 up = cubemapFaceNormals[i][1];
+        cam.lookAt(eye, center, up);
+        cam.enable();
+
+        //render the scene from this point of view
+        irr_fbo->bind();
+        renderForward(&cam, scene, this->render_call_vector);
+        irr_fbo->unbind();
+
+        //read the pixels back and store in a FloatImage
+        images[i].fromTexture(irr_fbo->color_textures[0]);
+    }
+    //reset rendering mode
+    rendering_mode = current;
+    
+    //compute the coefficients given the six images
+    probe.sh = computeSH(images);
+}
+
+// to generate and place the probes
+void GTR::Renderer::generateProbesGrid(GTR::Scene* scene)
+{
+
+    this->probes.clear(); // reset vector
+    
+    //now delta give us the distance between probes in every axis
+    for (int z = 0; z < dim.z; ++z)
+        for (int y = 0; y < dim.y; ++y)
+            for (int x = 0; x < dim.x; ++x)
+                {
+                    sProbe p;
+                    p.local.set(x, y, z);
+
+                    //index in the linear array
+                    p.index = x + y * dim.x + z * dim.x * dim.y;
+
+                    //and its position
+                    p.pos = start_pos + delta * Vector3(x,y,z);
+                    this->probes.push_back(p);
+                }
+    //now compute the coeffs for every probe
+    for (int iP = 0; iP < this->probes.size(); ++iP)
+    {
+        captureProbe(this->probes[iP], scene);
+    }
+    // generate irradiance texture
+    uploadProbes();
+}
+
+// to update irradiance texture
+void GTR::Renderer::updateIrradiance(GTR::Scene* scene)
+{
+    // compute the coeffs for every probe
+    for (int iP = 0; iP < this->probes.size(); ++iP)
+    {
+        captureProbe(this->probes[iP], scene);
+    }
+    // generate irradiance texture
+    uploadProbes();
+}
+
+// to upload Probes to the GPU
+void GTR::Renderer::uploadProbes()
+{
+    //create the texture to store the probes (do this ONCE!!!)
+    if(probes_texture != NULL){delete probes_texture;}
+    
+    probes_texture = new Texture(9,                   //9 coefficients per probe
+                                 this->probes.size(), //as many rows as probes
+                                 GL_RGB,              //3 channels per coefficient
+                                 GL_FLOAT );          //they require a high range
+        
+    
+    //we must create the color information for the texture. because every SH are 27 floats in the RGB,RGB,... order, we can create an array of SphericalHarmonics and use it as pixels of the texture
+    SphericalHarmonics* sh_data = NULL;
+    sh_data = new SphericalHarmonics[dim.x * dim.y * dim.z];
+
+    //here we fill the data of the array with our probes in x,y,z order
+    for (int i = 0; i < probes.size(); ++i)
+        sh_data[i] = probes[i].sh;
+
+    //now upload the data to the GPU as a texture
+    probes_texture->upload( GL_RGB, GL_FLOAT, false, (uint8*)sh_data);
+
+    //disable any texture filtering when reading
+    probes_texture->bind();
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+
+    //always free memory after allocating it!!!
+    delete[] sh_data;
+}
+
+// to consider irradiance for the ambient light
+void GTR::Renderer::displayIrradiance(Camera* camera, GTR::Scene* scene)
+{
+    int w = Application::instance->window_width;
+    int h = Application::instance->window_height;
+    
+    // Compute Inverse View Projection
+    Matrix44 inv_vp = camera->viewprojection_matrix;
+    inv_vp.inverse();
+    
+    //we need a fullscreen quad
+    Mesh* quad = Mesh::getQuad();
+    Shader* shader = Shader::Get("irradiance");
+    shader->enable();
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+    
+    // pass the gbuffers to the shader and irradiance texture
+    shader->setUniform("u_color_texture", gbuffers_fbo->color_textures[0], 6);
+    shader->setUniform("u_normal_texture", gbuffers_fbo->color_textures[1], 7);
+    shader->setUniform("u_extra_texture", gbuffers_fbo->color_textures[2], 8);
+    shader->setUniform("u_depth_texture", gbuffers_fbo->depth_texture, 9);
+    shader->setUniform("u_probes_texture", probes_texture, 12);
+
+    // upload variables to the shader
+    shader->setUniform("u_inverse_viewprojection", inv_vp);
+    shader->setUniform("u_iRes", Vector2(1.0 / (float)w, 1.0 / (float)h));
+
+    shader->setUniform("u_irr_start", start_pos);
+    shader->setUniform("u_irr_end", end_pos);
+    shader->setUniform("u_irr_dims", dim);
+    shader->setUniform("u_irr_normal_distance",irr_normal_distance);
+    shader->setUniform("u_irr_delta", delta);
+    shader->setUniform("u_num_probes", (float)probes_texture->height);
+
+    
+    quad->render(GL_TRIANGLES);
+    shader->disable();
+    
+    //set the render state as it was before to avoid problems with future renders
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDepthFunc(GL_LESS);
+}
 
 Texture* GTR::CubemapFromHDRE(const char* filename)
 {
@@ -953,6 +1223,7 @@ Texture* GTR::CubemapFromHDRE(const char* filename)
 		}
 	return texture;
 }
+
 
 // generate sphere points
 std::vector<Vector3> GTR::generateSpherePoints(int num, float radius, bool hemi)

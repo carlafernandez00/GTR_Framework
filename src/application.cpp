@@ -75,7 +75,8 @@ Application::Application(int window_width, int window_height, SDL_Window* window
 
 	//This class will be the one in charge of rendering all 
 	renderer = new GTR::Renderer(); //here so we have opengl ready in constructor
-
+    renderer->generateProbesGrid(scene); //compute irradiance texture
+    
 	//hide the cursor
 	SDL_ShowCursor(!mouse_locked); //hide or show the mouse
 }
@@ -328,6 +329,8 @@ void Application::onKeyDown( SDL_KeyboardEvent event )
 		case SDLK_F1: render_debug = !render_debug; break;
 		case SDLK_f: camera->center.set(0, 0, 0); camera->updateViewMatrix(); break;
 		case SDLK_F5: Shader::ReloadAll(); break;
+        case SDLK_SPACE: renderer->updateIrradiance(scene);break; // upload irradiance probes
+        case SDLK_0: renderer->captureProbe(renderer->probe, scene);break;
 		case SDLK_F6:
 			scene->clear();
 			scene->load(scene->filename.c_str());

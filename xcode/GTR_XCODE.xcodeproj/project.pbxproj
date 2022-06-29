@@ -51,6 +51,8 @@
 		C3095753280C1C6400CA01F6 /* task.cpp in Sources */ = {isa = PBXBuildFile; fileRef = C3095751280C1C6300CA01F6 /* task.cpp */; };
 		C3095754280C1C6400CA01F6 /* task.h in Sources */ = {isa = PBXBuildFile; fileRef = C3095752280C1C6300CA01F6 /* task.h */; };
 		C3095757280C1CE300CA01F6 /* SDL2.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C3095756280C1CE300CA01F6 /* SDL2.framework */; };
+		C31447972868C7A2004A5B35 /* sphericalharmonics.h in Sources */ = {isa = PBXBuildFile; fileRef = C31447962868C7A2004A5B35 /* sphericalharmonics.h */; };
+		C31447992868C7B8004A5B35 /* sphericalharmonics.cpp in Sources */ = {isa = PBXBuildFile; fileRef = C31447982868C7B8004A5B35 /* sphericalharmonics.cpp */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -132,6 +134,8 @@
 		C3095751280C1C6300CA01F6 /* task.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = task.cpp; path = ../src/task.cpp; sourceTree = "<group>"; };
 		C3095752280C1C6300CA01F6 /* task.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = task.h; path = ../src/task.h; sourceTree = "<group>"; };
 		C3095756280C1CE300CA01F6 /* SDL2.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SDL2.framework; path = ../../../../../../../Library/Frameworks/SDL2.framework; sourceTree = "<group>"; };
+		C31447962868C7A2004A5B35 /* sphericalharmonics.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = sphericalharmonics.h; path = ../src/sphericalharmonics.h; sourceTree = "<group>"; };
+		C31447982868C7B8004A5B35 /* sphericalharmonics.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = sphericalharmonics.cpp; path = ../src/sphericalharmonics.cpp; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -153,6 +157,8 @@
 		12BE84B11981D8180090DDBD = {
 			isa = PBXGroup;
 			children = (
+				C31447982868C7B8004A5B35 /* sphericalharmonics.cpp */,
+				C31447962868C7A2004A5B35 /* sphericalharmonics.h */,
 				C3095751280C1C6300CA01F6 /* task.cpp */,
 				C3095752280C1C6300CA01F6 /* task.h */,
 				1278921C262C454100178A4E /* scene.cpp */,
@@ -358,6 +364,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C31447992868C7B8004A5B35 /* sphericalharmonics.cpp in Sources */,
+				C31447972868C7A2004A5B35 /* sphericalharmonics.h in Sources */,
 				C3095753280C1C6400CA01F6 /* task.cpp in Sources */,
 				C3095754280C1C6400CA01F6 /* task.h in Sources */,
 				1278921E262C454100178A4E /* scene.cpp in Sources */,

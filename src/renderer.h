@@ -1,6 +1,8 @@
 #pragma once
 #include "prefab.h"
 #include "shader.h"
+#include "sphericalharmonics.h"
+
 
 //forward declarations
 class Camera;
@@ -36,9 +38,12 @@ namespace GTR {
     enum eShowOption {
         GBUFFERS,
         SSAO,
-        SCENE
+        SCENE,
+        IRRADIANCE_TEXTURE,
+        IRRADIANCE
     };
 
+    //struct to store RenderCalls
     struct RenderCall
         {
             Material* material;
@@ -57,7 +62,16 @@ namespace GTR {
             }
             
         };
-    
+
+    //struct to store probes
+    struct sProbe
+        {
+            Vector3 pos;           //where is located
+            Vector3 local;         //its ijk pos in the matrix
+            int index;             //its index in the linear array
+            SphericalHarmonics sh; //coeffs
+        };
+        
     // This class is in charge of rendering anything in our system.
     // Separating the render from anything else makes the code cleaner
 	class Renderer
@@ -66,6 +80,15 @@ namespace GTR {
 	public:
         std::vector<RenderCall> render_call_vector;
         std::vector<GTR::LightEntity*> lights;
+        std::vector<Vector3> rand_points;
+        std::vector<sProbe> probes;
+        
+        Vector3 dim;
+        Vector3 start_pos;
+        Vector3 end_pos;
+        Vector3 delta;
+        float irr_normal_distance;
+        
         eRenderingMode rendering_mode;
         eRenderingPipeline rendering_pipeline;
         eToneMapper tone_mapper;
@@ -78,15 +101,20 @@ namespace GTR {
         bool use_hdr;
         bool use_dither;
         bool pbr;
+        bool show_probes;
+        bool show_irradiance;
+        bool add_irradiance;
+        bool interpolate_irradiance;
         
         FBO* gbuffers_fbo;
         FBO* illumination_fbo;
         FBO* ssao_fbo;
         FBO* blur_ssao_fbo;
+        FBO* irr_fbo;
         
-        std::vector<Vector3> rand_points;
-        std::vector<GTR::LightEntity*> rand_lights;
+        Texture* probes_texture;
         
+        sProbe probe;
         Renderer();
                  
 		//renders several elements of the scene
@@ -139,7 +167,27 @@ namespace GTR {
         
         // to show shadowmap
         void showShadowmap(LightEntity* light);
-
+        
+        // to render probes
+        void renderProbesGrid(float size);
+        
+        void renderProbe(float size);
+        
+        // to render probe in all six positions and its compute coefficients
+        void captureProbe(sProbe& probe, GTR::Scene* scene);
+        
+        // to generate and place the probes
+        void generateProbesGrid(GTR::Scene* scene);
+        
+        // to update irradiance texture
+        void updateIrradiance(GTR::Scene* scene);
+        
+        // to upload Probes to the GPU
+        void uploadProbes();
+        
+        // to consider irradiance for the ambient light
+        void displayIrradiance(Camera* camera, GTR::Scene* scene);
+        
 	};
     
 	Texture* CubemapFromHDRE(const char* filename);

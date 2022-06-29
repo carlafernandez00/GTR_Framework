@@ -6,7 +6,8 @@
 	"camera_target":[0,40,0],
 	"camera_fov":60,
 	"entities":[
-		{
+        
+        {
 			"name":"floor",
 			"type":"PREFAB",
 			"filename":"prefabs/floor.glb",
@@ -33,6 +34,14 @@
 			"position":[300,0,200],
 			"scale":[0.4,0.4,0.4]
 		},
+        {
+            "name":"sign",
+            "type":"PREFAB",
+            "filename":"prefabs/sign.glb",
+            "position":[118,48,-400],
+            "angle":120,
+            "scale":[60,60,60]
+        },
 		{
 			"name":"house",
 			"type":"PREFAB",
@@ -60,7 +69,7 @@
 			"type":"LIGHT",
 			"position":[0,36,-16],
 			"angle": -45,
-			"color":[1,0.9,0.8],
+            "color":[1,0.9,0.8],
 			"intensity":10,
 			"max_dist":1000,
 			"cone_angle":45,
